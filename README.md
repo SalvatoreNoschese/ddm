@@ -376,7 +376,7 @@ MIT License — see [LICENSE](LICENSE)
 
 ## 🤝 Contributing
 
-The codebase is well-organized and documented. Contributions welcome via issues or pull requests on [GitHub](https://github.com/SalvatoreNoschese/ddm).
+The codebase is well-organized and documented. Contributions welcome via issues or pull requests on [GitHub](https://github.com/SalvatoreNoschese/ddm/issues).
 
 ## 📗 Links
 
