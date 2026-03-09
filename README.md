@@ -1,4 +1,4 @@
-# DDevManager (ddm)
+# DDevManager (ddm) v1.0.0
 
 ![DDevManager](/assets/banner.png)
 
@@ -7,18 +7,6 @@
 ![Platform](https://img.shields.io/badge/platform-linux-lightgrey)
 
 **Professional DDEV project manager with one-click installations and multi-framework support**
-
----
-
-**Author:** Salvatore Noschese
-
-**Website:** [salvatorenoschese.it](https://salvatorenoschese.it)
-
-**GitHub:** [github.com/SalvatoreNoschese/ddm](https://github.com/SalvatoreNoschese/ddm)
-
-**Support:** [PayPal](https://paypal.me/SalvatoreN)
-
-**Version:** 1.0.0
 
 ---
 
