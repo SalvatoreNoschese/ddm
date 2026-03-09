@@ -1,10 +1,10 @@
-# DDevManager (ddm) v1.0.0
-
-![DDevManager](/assets/banner.png)
+# DDevManager (ddm)
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-linux-lightgrey)
+
+![DDevManager](/assets/banner.png)
 
 **Professional DDEV project manager with one-click installations and multi-framework support**
 
