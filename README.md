@@ -11,9 +11,13 @@
 ---
 
 **Author:** Salvatore Noschese
+
 **Website:** [salvatorenoschese.it](https://salvatorenoschese.it)
+
 **GitHub:** [github.com/SalvatoreNoschese/ddm](https://github.com/SalvatoreNoschese/ddm)
+
 **Support:** [PayPal](https://paypal.me/SalvatoreN)
+
 **Version:** 1.0.0
 
 ---
