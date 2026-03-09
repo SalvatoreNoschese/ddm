@@ -1,0 +1,3298 @@
+#!/usr/bin/env bash
+# ================================================== #
+# DDevManager (ddm) v1.0.0                           #
+# One-click DDEV project manager for:                #
+# WordPress, Drupal, Joomla, Laravel and more...     #
+#                                                    #
+# Author:   Salvatore Noschese                       #
+# Web:      https://SalvatoreNoschese.it             #
+# Donate:   https://PayPal.me/SalvatoreN             #
+# Repo:     https://github.com/SalvatoreNoschese/ddm #
+# License:  MIT                                      #
+# ================================================== #
+set -u
+
+# ======================= #
+# CONFIGURATION & GLOBALS #
+# ======================= #
+
+DDM_VER="1.0.0"
+DDM_BIN="$HOME/.local/bin/ddm"
+DDM_CONFIG_DIR="$HOME/.config/ddm"
+DDM_CONF="$DDM_CONFIG_DIR/ddm.conf"
+DDM_INFO="DDevManager (ddm) v$DDM_VER"
+
+UPDATE_FILE="$DDM_CONFIG_DIR/ddm-update-check"
+UPDATE_INTERVAL=604800 # 7 days in seconds
+UPDATE_URL="https://raw.githubusercontent.com/SalvatoreNoschese/ddm/main/ddm"
+
+DDEV_DIR="" # Set by check_system(); empty until then.
+DDEV_INSTURL="https://ddev.com/install.sh"
+DDEV_INSTCMD="curl -fsSL $DDEV_INSTURL | bash"
+DDEV_DOCS_URL="https://ddev.com/get-started/"
+
+DOCKER_INSTURL="https://get.docker.com"
+DOCKER_INSTCMD="curl -fsSL $DOCKER_INSTURL | sh"
+DOCKER_DOCS_URL="https://docs.docker.com/engine/install/"
+
+# ─── Config helpers ─── #
+
+# Read a value from ddm.conf. Usage: _conf_get "key"
+_conf_get() {
+	local key="$1"
+	[[ -f "$DDM_CONF" ]] || { echo ""; return 1; }
+	grep -m1 "^${key}=" "$DDM_CONF" 2>/dev/null | cut -d= -f2-
+}
+
+# Write/update a key in ddm.conf. Usage: _conf_set "key" "value"
+_conf_set() {
+	local key="$1" value="$2"
+	mkdir -p "$DDM_CONFIG_DIR"
+	if [[ -f "$DDM_CONF" ]] && grep -q "^${key}=" "$DDM_CONF" 2>/dev/null; then
+		sed -i "s;^${key}=.*;${key}=${value};" "$DDM_CONF"
+	else
+		printf '%s=%s\n' "$key" "$value" >> "$DDM_CONF"
+	fi
+}
+
+# ====== #
+# COLORS #
+# ====== #
+
+# Bright
+R=$'\033[1;31m' # Red
+G=$'\033[1;32m' # Green
+Y=$'\033[1;33m' # Yellow
+B=$'\033[1;34m' # Blue
+M=$'\033[1;35m' # Magenta
+C=$'\033[1;36m' # Cyan
+# Reset
+NC=$'\033[0m'
+
+# ================= #
+# OUTPUT PRIMITIVES #
+# ================= #
+
+_info()  { printf "${B}[i]${NC} %s\n" "$1"; }
+_done()  { printf "${G}[✓]${NC} %s\n" "$1"; }
+_warn()  { printf "${Y}[!]${NC} %s\n" "$1"; }
+_error() { printf "${R}[✗]${NC} %s\n" "$1" >&2; }
+_nl()    { printf "\n"; }
+
+# Displays an indented line with a leading arrow symbol.
+# First argument is always the arrow color (or "" for plain/neutral).
+# Remaining arguments are the text to display.
+#   _say "$Y" "simple warning"       # yellow arrow — shell command
+#   _say "$B" "some note"            # blue arrow   — informational context
+#   _say ""   "a path or URL"        # plain arrow  — neutral
+#   _say ""   "${G}colored txt${NC}" # plain arrow  — pre-colored string
+_say() {
+	local color="$1"
+	shift
+	printf " %s>%s  %s\n" "$color" "$NC" "$*"
+}
+
+# Renders a bordered box around a single-line title.
+# Usage: _printbox "$COLOR" "Title Text"
+_printbox() {
+	local color="$1" text="$2" pad=1 line=""
+	local text_len="${#text}"
+	local inner=$((text_len + pad * 2))
+	for ((i = 0; i < inner; i++)); do line+="═"; done
+	printf "\n"
+	printf "%s╔%s╗%s\n" "$color" "$line" "$NC"
+	printf "%s║%*s%s%*s║%s\n" "$color" "$pad" "" "$text" "$pad" "" "$NC"
+	printf "%s╚%s╝%s\n" "$color" "$line" "$NC"
+	printf "\n"
+}
+
+# Returns the installed DDEV version string (e.g. "v1.23.4"), or empty if not installed.
+_ddev_version() {
+	ddev --version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1
+}
+
+# Returns the installed Docker version string (e.g. "v27.3.1"), or empty if not installed.
+_docker_version() {
+	docker --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 | sed 's/^/v/'
+}
+
+# ====================== #
+# PROJECT TYPES REGISTRY #
+# ====================== #
+# Format per entry: "key:Display Name:prefix:admin_path"
+# key        — maps to install_<key>() (hyphens normalized to underscores)
+# prefix     — prepended to project names, e.g. wp-myblog
+# admin_path — admin URL path (empty if none)
+#
+# Category is implicit in each source array — injected into PROJECT_TYPES at build time.
+
+PROJECT_TYPES_CMS=(
+	"wordpress:WordPress:wp:/wp-admin"
+	"drupal10:Drupal 10:dr10:/user/login"
+	"drupal11:Drupal 11:dr11:/user/login"
+	"drupal-cms:Drupal CMS:drcms:/user/login"
+	"backdrop:Backdrop CMS:bd:/user/login"
+	"joomla:Joomla:joo:/administrator"
+	"typo3:TYPO3 v14:t3:/typo3"
+	"craft:Craft CMS:cf:/admin"
+	"statamic:Statamic CMS:st:/cp"
+	"shopware6:Shopware 6:sw:/admin"
+	"grav:Grav CMS:grv:/admin"
+	"kirby:Kirby CMS:kb:/panel"
+	"contao:Contao CMS:cnt:/contao"
+	"winter-cms:Winter CMS:win:/backend"
+	"processwire:ProcessWire:pw:/processwire"
+)
+
+PROJECT_TYPES_FRAMEWORK=(
+	"laravel:Laravel:lrv:"
+	"symfony:Symfony:sf:"
+	"cakephp:CakePHP:cake:"
+	"codeigniter:CodeIgniter:ci:"
+	"php-generic:PHP Generic:php:"
+)
+
+PROJECT_TYPES_EXTRA=(
+	"classicpress:ClassicPress:cp:/wp-admin"
+	"moodle:Moodle LMS:mdl:/login"
+	"prestashop:PrestaShop:ps:/"
+	"flarum:Flarum - Forum:flr:/admin"
+	"matomo:Matomo Analytics:mat:/"
+)
+
+# Build combined PROJECT_TYPES array at startup.
+# Category is injected from the source array name: key:label:prefix:cat:admin_path
+PROJECT_TYPES=()
+for _e in "${PROJECT_TYPES_CMS[@]}";       do IFS=':' read -r _k _l _p _a <<<"$_e"; PROJECT_TYPES+=("$_k:$_l:$_p:cms:$_a");       done
+for _e in "${PROJECT_TYPES_FRAMEWORK[@]}"; do IFS=':' read -r _k _l _p _a <<<"$_e"; PROJECT_TYPES+=("$_k:$_l:$_p:framework:$_a"); done
+for _e in "${PROJECT_TYPES_EXTRA[@]}";     do IFS=':' read -r _k _l _p _a <<<"$_e"; PROJECT_TYPES+=("$_k:$_l:$_p:extra:$_a");     done
+unset _e _k _l _p _a
+
+# Parses a raw PROJECT_TYPES entry into named fields via a Bash 4.3 nameref.
+# Usage:
+#   local -A t
+#   _parse_type_entry "$entry" t
+#   echo "${t[key]} ${t[label]} ${t[prefix]} ${t[cat]} ${t[admin]}"
+_parse_type_entry() {
+	local _raw="$1"
+	local -n _t="$2"
+	IFS=':' read -r '_t[key]' '_t[label]' '_t[prefix]' '_t[cat]' '_t[admin]' <<<"$_raw"
+}
+
+# ======================================================== #
+# Convention:                                              #
+# - Function name: install_<key>  (key from PROJECT_TYPES) #
+# - Must call _setup_project_dir "$name" as the first step #
+# - Must call _finalize_installation as the last step      #
+# ======================================================== #
+
+# ─── CMS ─── #
+
+# WordPress
+install_wordpress() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring WordPress..."
+	ddev config --project-type=wordpress || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Downloading & Installing WordPress..."
+	ddev wp core download || {
+		_error "WordPress download failed"
+		return 1
+	}
+
+	_info "Running WordPress site:install..."
+	ddev wp core install --url="https://${name}.ddev.site" --title="Dev WP" \
+		--admin_user=admin --admin_password=admin --admin_email=admin@example.com || {
+			_error "WordPress install failed"
+			return 1
+		}
+
+	_finalize_installation "$name" "admin" "admin" ""
+}
+
+# Drupal 10 Core
+install_drupal10() { _drupal_core "$1" "10"; }
+# Drupal 11 Core
+install_drupal11() { _drupal_core "$1" "11"; }
+
+# Shared installer for Drupal Core (version-agnostic).
+# Usage: _drupal_core <name> <major_version>
+_drupal_core() {
+	local name="$1" ver="$2"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Drupal ${ver}..."
+	ddev config --project-type="drupal${ver}" --docroot=web || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Installing Drupal via Composer & Drush..."
+	ddev composer create-project "drupal/recommended-project:^${ver}" || {
+		_error "Drupal composer create failed"
+		return 1
+	}
+	ddev composer require drush/drush || {
+		_error "Drush install failed"
+		return 1
+	}
+	ddev drush site:install --account-name=admin --account-pass=admin -y || {
+		_error "Drupal site:install failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "admin" "admin" ""
+}
+
+# Drupal CMS (Starshot)
+install_drupal_cms() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Drupal CMS..."
+	ddev config --project-type=drupal11 --docroot=web || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Creating Drupal CMS project..."
+	ddev composer create-project drupal/cms || {
+		_error "Drupal CMS create-project failed"
+		return 1
+	}
+	# recipe-unpack runs automatically in DDEV v1.25.0+; the fallback is harmless.
+	ddev composer drupal:recipe-unpack || true
+
+	_finalize_installation "$name" "" "" "Manual install: setup via the browser."
+}
+
+# Backdrop CMS
+install_backdrop() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Backdrop CMS..."
+	ddev config --project-type=backdrop || {
+		_error "ddev config failed"
+		return 1
+	}
+	ddev add-on get backdrop-ops/ddev-backdrop-bee || {
+		_error "Backdrop Bee add-on failed"
+		return 1
+	}
+	_ddev_start || return 1
+	ddev bee download-core || {
+		_error "Backdrop download-core failed"
+		return 1
+	}
+	ddev bee si --username=admin --password=Password123 \
+		--db-name=db --db-user=db --db-pass=db --db-host=db --auto || {
+			_error "Backdrop site install failed"
+			return 1
+		}
+
+	_finalize_installation "$name" "admin" "Password123" ""
+}
+
+# Joomla
+install_joomla() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+	local download_url=""
+
+	download_url="$(
+		curl -fsSL https://api.github.com/repos/joomla/joomla-cms/releases/latest |
+			jq -r '.assets | map(select(.name | test("^Joomla.*Stable-Full_Package\\.zip$")))[0].browser_download_url'
+	)"
+
+	if [[ -z "$download_url" || "$download_url" == "null" || "$download_url" != https://* ]]; then
+		_error "Could not fetch Joomla download URL from GitHub API (rate limit, connectivity issue, or API change)."
+		_info "Tip: try again later, or test connectivity with: curl -I https://api.github.com/"
+		return 1
+	fi
+
+	_info "Downloading: ${download_url##*/}"
+	trap 'rm -f joomla.zip' RETURN
+	curl --max-time 300 -fL --retry 3 --retry-delay 2 -o joomla.zip "$download_url" || {
+		_error "Download failed"
+		return 1
+	}
+
+	unzip -q joomla.zip || {
+		_error "Unzip failed"
+		return 1
+	}
+	rm -f joomla.zip; trap - RETURN
+
+	_info "Configuring DDEV..."
+	ddev config --project-type=php --webserver-type=apache-fpm --upload-dirs=images || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Installing Joomla via CLI..."
+	ddev php installation/joomla.php install \
+		--site-name="Dev Joomla" \
+		--admin-user="Administrator" \
+		--admin-username=admin \
+		--admin-password=AdminAdmin1! \
+		--admin-email=admin@example.com \
+		--db-type=mysql \
+		--db-encryption=0 \
+		--db-host=db \
+		--db-user=db \
+		--db-pass="db" \
+		--db-name=db \
+		--db-prefix=ddev_ \
+		--public-folder="" || {
+		_error "Joomla install failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "admin" "AdminAdmin1!" ""
+}
+
+# TYPO3 v14
+install_typo3() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring TYPO3..."
+	ddev config --project-type=typo3 --docroot=public || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Setup TYPO3 via Composer..."
+	ddev composer create "typo3/cms-base-distribution" || {
+		_error "TYPO3 Composer create failed"
+		return 1
+	}
+	ddev typo3 setup \
+		--admin-user-password="Demo123*" \
+		--driver=mysqli \
+		--create-site="https://${name}.ddev.site" \
+		--server-type=other \
+		--dbname=db \
+		--username=db \
+		--password=db \
+		--port=3306 \
+		--host=db \
+		--admin-username=admin \
+		--admin-email=admin@example.com \
+		--project-name="My TYPO3 site" \
+		--force || {
+		_error "TYPO3 setup failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "admin" "Demo123*" ""
+}
+
+# Craft CMS
+install_craft() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Craft CMS..."
+	ddev config --project-type=craftcms --docroot=web || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+	_nl
+	_info "Creating Craft CMS project (setup via terminal)..."
+	_presskey
+	ddev composer create-project craftcms/craft || {
+		_error "Craft Composer create failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "" "" ""
+}
+
+# Statamic CMS
+install_statamic() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Statamic CMS..."
+	ddev config --project-type=laravel --docroot=public || {
+		_error "DDEV config failed"
+		return 1
+	}
+
+	_info "Creating Statamic via Composer..."
+	# NOTE: 'ddev start' is intentionally omitted before composer create-project.
+	# Per the official DDEV quickstart, Statamic's installer handles container
+	# startup automatically as part of the composer create-project flow.
+	ddev composer create-project --prefer-dist statamic/statamic || {
+		_error "Statamic create failed"
+		return 1
+	}
+
+	_info "Creating super user..."
+	ddev php please make:user admin@example.com --password=admin1234 --super --no-interaction || _warn "Statamic make:user failed"
+
+	_finalize_installation "$name" "admin@example.com" "admin1234" ""
+}
+
+# Shopware
+install_shopware6() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Shopware 6..."
+	ddev config --project-type=shopware6 --docroot=public || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+	_nl
+	_info "Creating Shopware project via Composer..."
+	_say "$B" "If it asks 'Do you want to include Docker configuration from recipes?'"
+	_say "$Y" "answer 'x', as we're using DDEV for this rather than its recipes."
+	_presskey
+	ddev composer create-project shopware/production || {
+		_error "Composer create-project failed"
+		return 1
+	}
+
+	_info "Running Shopware system install..."
+	ddev exec console system:install --basic-setup || {
+		_error "Shopware system:install failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "admin" "shopware" ""
+}
+
+# Grav CMS
+install_grav() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Grav CMS (flat-file, no database)..."
+	ddev config --project-type=php --php-version=8.3 --omit-containers=db || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Creating Grav project via Composer..."
+	ddev composer create-project getgrav/grav || {
+		_error "Composer create-project failed"
+		return 1
+	}
+
+	_info "Installing Grav Admin plugin..."
+	ddev exec gpm install admin -y || {
+		_error "Grav admin install failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "" "" "Complete setup via browser at /admin" "nodb"
+}
+
+# Kirby CMS
+install_kirby() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Kirby CMS (flat-file, no database)..."
+	ddev config --project-type=php --omit-containers=db --webserver-type=apache-fpm || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Creating Kirby Starterkit via Composer..."
+	ddev composer create-project getkirby/starterkit || {
+		_error "Composer create-project failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "" "" "Panel available at /panel — create your account on first visit." "nodb"
+}
+
+# Contao
+install_contao() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Contao CMS..."
+	ddev config --project-type=php --docroot=public --webserver-type=apache-fpm --php-version=8.2 || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Creating Contao project via Composer..."
+	ddev composer create-project contao/managed-edition:5.3 || {
+		_error "Composer create-project failed"
+		return 1
+	}
+
+	_info "Configuring database..."
+	ddev dotenv set .env.local --database-url=mysql://db:db@db:3306/db --mailer-dsn=smtp://localhost:1025 || {
+		_error "Dotenv config failed"
+		return 1
+	}
+
+	_info "Running Contao migrations..."
+	ddev exec contao-console contao:migrate --no-interaction || {
+		_error "Contao migrate failed"
+		return 1
+	}
+
+	_info "Creating admin user..."
+	ddev exec contao-console contao:user:create --username=admin --name=Administrator --email=admin@example.com --language=en --password=Password123 --admin || {
+		_error "Admin user creation failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "admin" "Password123" "Frontend shows 404 until you configure a root page in /contao → Page Tree."
+}
+
+# Winter CMS
+install_winter_cms() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Winter CMS..."
+	ddev config --project-type=php --webserver-type=apache-fpm || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Installing Winter CMS via Composer..."
+	ddev composer create-project wintercms/winter --no-scripts || {
+		_error "Composer create-project failed"
+		return 1
+	}
+
+	_info "Configuring environment..."
+	ddev exec bash -c 'cp .env.example .env 2>/dev/null || true'
+	ddev exec bash -c 'sed -i \
+    -e "s|DB_HOST=.*|DB_HOST=db|" \
+    -e "s|DB_DATABASE=.*|DB_DATABASE=db|" \
+    -e "s|DB_USERNAME=.*|DB_USERNAME=db|" \
+    -e "s|DB_PASSWORD=.*|DB_PASSWORD=db|" \
+    .env' || {
+		_error ".env config failed"
+		return 1
+	}
+	ddev exec php artisan key:generate || {
+		_error "key:generate failed"
+		return 1
+	}
+
+	_info "Running Winter CMS migrations..."
+	ddev exec php artisan winter:up || {
+		_error "winter:up failed"
+		return 1
+	}
+
+	_info "Setting admin password to 'admin' (ignore previous random password)..."
+	ddev exec php artisan winter:passwd admin admin || {
+		_error "winter:passwd failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "admin" "admin" ""
+}
+
+# ProcessWire
+install_processwire() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+	local notes="Browser installer: DB host=db  DB name=db  DB user=db  DB pass=db"
+	notes+="  |  Keep the default admin path (/processwire) — if customized, the admin URL won't display correctly."
+
+	_info "Downloading ProcessWire..."
+	trap 'rm -f processwire-master.zip' RETURN
+	curl -LJOf https://github.com/processwire/processwire/archive/master.zip || {
+		_error "Download failed"
+		return 1
+	}
+	unzip -q processwire-master.zip || {
+		_error "Unzip failed"
+		return 1
+	}
+	rm -f processwire-master.zip; trap - RETURN
+	if [[ -d "processwire-master" ]]; then
+		(
+			shopt -s dotglob
+			mv processwire-master/* .
+		)
+		mv processwire-master/.* . 2>/dev/null || true
+		rm -rf processwire-master
+	fi
+
+	_info "Configuring ProcessWire..."
+	ddev config --project-type=php --webserver-type=apache-fpm || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_finalize_installation "$name" "" "" "$notes"
+}
+
+# ─── FrameWork ─── #
+
+# Laravel
+install_laravel() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Laravel..."
+	ddev config --project-type=laravel --docroot=public || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Creating Laravel via Composer..."
+	ddev composer create-project laravel/laravel || {
+		_error "Laravel create failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "" "" "Laravel installed: Start building!"
+}
+
+# Symfony
+install_symfony() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Symfony..."
+	ddev config --project-type=symfony --docroot=public || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Creating Symfony skeleton..."
+	ddev composer create-project symfony/skeleton || {
+		_error "Symfony create failed"
+		return 1
+	}
+	_nl
+	# NOTE: 'ddev composer require webapp' asks interactively:
+	# "Include Docker configuration?" -- answer 'x' (cancel/no) when prompted.
+	# The pause below gives you a moment to read this before the prompt appears.
+	_say "$B" "Next Step: 'ddev composer require webapp'..."
+	_say "$Y" "It'll ask for Docker config -- press 'x' to say no."
+	_presskey
+	ddev composer require webapp || _warn "Failed to install webapp (non-critical)"
+
+	_finalize_installation "$name" "" "" "Symfony skeleton ready!"
+}
+
+# CakePHP
+install_cakephp() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring CakePHP..."
+	ddev config --project-type=cakephp --docroot=webroot || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Creating CakePHP project via Composer..."
+	ddev composer create-project --prefer-dist --no-interaction cakephp/app:~5.0 || {
+		_error "Composer create-project failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "" "" "CakePHP ready! Database auto-configured."
+}
+
+# CodeIgniter
+install_codeigniter() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring CodeIgniter 4..."
+	ddev config --project-type=php --docroot=public || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Creating CodeIgniter project via Composer..."
+	ddev composer create-project codeigniter4/appstarter || {
+		_error "Composer create-project failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "" "" "CodeIgniter 4 ready! Database auto-configured."
+}
+
+# PHP Generic
+install_php_generic() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring PHP Generic..."
+	ddev config --project-type=php || {
+		_error "DDEV config failed"
+		return 1
+	}
+
+	printf '%s\n' '<?php phpinfo(); ?>' >index.php
+
+	_info "Configuring PHP built-in server..."
+	mkdir -p .ddev
+	cat >.ddev/config.php-server.yaml <<-'EOF'
+		webserver_type: generic
+		web_extra_daemons:
+		    - name: "php-server"
+		      command: "php -S 0.0.0.0:8000 -t \"${DDEV_DOCROOT:-.}\""
+		      directory: /var/www/html
+		web_extra_exposed_ports:
+		    - name: "php-server"
+		      container_port: 8000
+		      http_port: 80
+		      https_port: 443
+	EOF
+
+	_ddev_start || return 1
+
+	_finalize_installation "$name" "" "" "PHP generic ready! Edit index.php to start building."
+}
+
+# ─── Extra ─── #
+
+# ClassicPress
+install_classicpress() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+	_info "Configuring ClassicPress (WordPress fork)..."
+	ddev config --project-type=wordpress || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+	_info "Downloading ClassicPress..."
+	trap 'rm -f classicpress.zip' RETURN
+	curl -L "https://www.classicpress.net/latest.zip" -o classicpress.zip || {
+		_error "Download failed"
+		return 1
+	}
+	unzip -q classicpress.zip || {
+		_error "Unzip failed"
+		return 1
+	}
+	rm -f classicpress.zip; trap - RETURN
+	local cpdir=""
+	cpdir="$(find . -maxdepth 1 -type d -name 'ClassicPress-*' | head -1)"
+	if [[ -n "$cpdir" ]]; then
+		(
+			shopt -s dotglob
+			mv "$cpdir"/* .
+		)
+		rm -rf "$cpdir"
+	fi
+	_finalize_installation "$name" "" "" "Browser installer: DB host=db  DB name=db  DB user=db  DB pass=db"
+}
+
+# Moodle LMS
+install_moodle() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Moodle LMS..."
+	ddev config --project-type=php --docroot=public --webserver-type=apache-fpm || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Installing Moodle via Composer..."
+	ddev composer create-project moodle/moodle || {
+		_error "Composer create-project failed"
+		return 1
+	}
+
+	_info "Running Moodle CLI installer..."
+	ddev exec "php admin/cli/install.php --non-interactive --agree-license --wwwroot=https://${name}.ddev.site --dbtype=mariadb --dbhost=db --dbname=db --dbuser=db --dbpass=db --fullname='DDEV Moodle' --shortname=moodle --adminpass=password" || {
+		_error "Moodle CLI install failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "admin" "password" ""
+}
+
+# PrestaShop
+install_prestashop() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Fetching latest PrestaShop release info..."
+	local api_url="https://api.prestashop-project.org/prestashop/stable"
+	local api_json=""
+	api_json="$(curl -fsSL --max-time 10 "$api_url")" || {
+		_error "Failed to fetch PrestaShop API"
+		return 1
+	}
+
+	local zip_url="" version="" zip_md5=""
+	zip_url="$(printf '%s' "$api_json" | jq -r '.zip_download_url')"
+	version="$(printf '%s' "$api_json"  | jq -r '.version')"
+	zip_md5="$(printf '%s' "$api_json"  | jq -r '.zip_md5')"
+
+	if [[ -z "$zip_url" || "$zip_url" == "null" ]]; then
+		_error "Could not parse PrestaShop download URL"
+		return 1
+	fi
+
+	_info "Latest version: ${G}${version}${NC}"
+
+	_info "Configuring DDEV..."
+	ddev config --project-type=php --webserver-type=apache-fpm || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Downloading PrestaShop ${version}..."
+	trap 'rm -f prestashop-bundle.zip' RETURN
+	curl -L "$zip_url" -o prestashop-bundle.zip || {
+		_error "Download failed"
+		return 1
+	}
+
+	if [[ -n "$zip_md5" && "$zip_md5" != "null" ]]; then
+		_info "Verifying MD5..."
+		local actual_md5
+		actual_md5="$(md5sum prestashop-bundle.zip | cut -d' ' -f1)"
+		if [[ "$actual_md5" != "$zip_md5" ]]; then
+			_error "MD5 mismatch! Expected: $zip_md5  Got: $actual_md5"
+			return 1
+		fi
+		_done "MD5 verified."
+	fi
+	_nl
+
+	# Extract the three files needed for browser setup.
+	unzip -q prestashop-bundle.zip || {
+		_error "Unzip failed"
+		return 1
+	}
+	rm -f prestashop-bundle.zip; trap - RETURN
+
+	_finalize_installation "$name" "" "" "Complete setup via browser: DB host=db  DB name=db  DB user=db  DB pass=db"
+}
+
+# Flarum
+install_flarum() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Flarum..."
+	ddev config --project-type=php --docroot=public --webserver-type=apache-fpm || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Creating Flarum project via Composer..."
+	ddev composer create-project flarum/flarum || {
+		_error "Composer create-project failed"
+		return 1
+	}
+
+	_finalize_installation "$name" "" "" "Browser installer: DB host=db  DB name=db  DB user=db  DB pass=db"
+}
+
+# Matomo
+install_matomo() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	_info "Configuring Matomo Analytics..."
+	ddev config --project-type=php --webserver-type=apache-fpm || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_info "Downloading Matomo..."
+	trap 'rm -f matomo.zip' RETURN
+	curl -L "https://builds.matomo.org/matomo-latest.zip" -o matomo.zip || {
+		_error "Download failed"
+		return 1
+	}
+	unzip -q matomo.zip || {
+		_error "Unzip failed"
+		return 1
+	}
+	rm -f matomo.zip; trap - RETURN
+	if [[ -d "matomo" ]]; then
+		(
+			shopt -s dotglob
+			mv matomo/* .
+		)
+		rm -rf matomo
+	fi
+
+	_finalize_installation "$name" "" "" "Browser installer: DB host=db  DB name=db  DB user=db  DB pass=db"
+}
+
+# ====================================================================== #
+# Runs post-installation steps shared by all installers:                 #
+#  1. Optionally installs a DB manager add-on (phpMyAdmin or Adminer)    #
+#  2. Prints the project URLs                                            #
+#  3. Shows default credentials (when provided)                          #
+#  4. Prints any extra notes                                             #
+#  5. Opens the project in the browser                                   #
+#                                                                        #
+# Parameters:                                                            #
+#  $1  name     - DDEV project name                                      #
+#  $2  username - admin username (empty string to skip credential block) #
+#  $3  password - admin password (empty string to skip credential block) #
+#  $4  notes    - extra message shown after credentials (empty to skip)  #
+# ====================================================================== #
+_finalize_installation() {
+	local name="$1" username="${2:-}" password="${3:-}" notes="${4:-}" nodb="${5:-}"
+	_restart() { ddev restart || _warn "Failed to run 'ddev restart' (non-critical)"; }
+
+	if [[ "$nodb" != "nodb" ]]; then
+		printf "%s\n" "Install a database manager? ${B}[default: * > None]${NC}"
+		printf "%s\n" " ${G}[1]${NC} Adminer"
+		printf "%s\n" " ${G}[2]${NC} phpMyAdmin"
+		printf "%s\n\n" " ${B}[*]${NC} None (skip: default)"
+		local db_choice
+		db_choice="$(_read_input "Choice [1/2/*]" "*")"
+		case "$db_choice" in
+		1)
+			_info "Installing Adminer..."
+			if ddev add-on get ddev/ddev-adminer; then
+				_invalidate_ddev_cache
+				_restart
+				_done "Adminer installed!"
+			else
+				_warn "Adminer installation failed (non-critical)"
+			fi
+			;;
+		2)
+			_info "Installing phpMyAdmin..."
+			if ddev add-on get ddev/ddev-phpmyadmin; then
+				_invalidate_ddev_cache
+				_restart
+				_done "phpMyAdmin installed!"
+			else
+				_warn "phpMyAdmin installation failed (non-critical)"
+			fi
+			;;
+		*)
+			_info "Skipping database manager."
+			;;
+		esac
+	fi
+
+	_nl
+	_done "Project '$name' successfully created!"
+	_show_project_urls "$name"
+
+	if [[ -n "$username" && -n "$password" ]]; then
+		_printbox "$Y" "DEFAULT CREDENTIALS"
+		_info "Username: ${G}$username${NC}"
+		_info "Password: ${G}$password${NC}"
+		_warn "SAVE THESE NOW: not shown in project menus!"
+		_say "$Y" "OK for local dev ONLY: change for production!"
+		_nl
+	fi
+
+	[[ -n "$notes" ]] && _info "$notes"
+
+	if _can_launch; then
+		project_open "$name" || true
+	else
+		_warn "Cannot launch browser on this system"
+	fi
+	_presskey
+}
+
+# ============= #
+# INPUT HELPERS #
+# ============= #
+
+# Prompts a yes/no question with a configurable default.
+# Usage: _prompt_yes_no "Question?" "Y"|"N"
+# Returns 0 for yes, 1 for no.
+_prompt_yes_no() {
+	local prompt="$1" default="${2:-Y}" choice=""
+	if [[ "$default" == "Y" ]]; then
+		read -r -p "$prompt [Y/n]: " choice
+		[[ -z "$choice" || "$choice" =~ ^[Yy] ]]
+	else
+		read -r -p "$prompt [y/N]: " choice
+		[[ "$choice" =~ ^[Yy] ]]
+	fi
+}
+
+# Reads a non-empty input string, re-prompting on blank input.
+# Usage: var=$(_read_input "Label" [default])
+_read_input() {
+	local prompt="${1:-Choice}" default="${2:-}" choice=""
+	while true; do
+		read -r -p "$prompt: " choice
+		choice="${choice:-$default}"
+		if [[ -n "${choice//[[:space:]]/}" ]]; then
+			echo "$choice"
+			return 0
+		fi
+		_warn "Empty input. Please try again." >&2
+	done
+}
+
+# Pauses execution until the user presses any key.
+# Usage: _presskey [action_verb] (defaults to "continue")
+_presskey() {
+	local msg="${1:-continue}"
+	_nl
+	read -r -n 1 -p "Press any key to $msg..."
+}
+
+# Displays a "going back" notice with a brief pause for UX feedback.
+# Usage: _back; return 0
+_back() {
+	_info "Going back..."
+	sleep .5
+}
+
+# Confirms whether the user wants to exit DDM.
+# Calls exit 0 on confirmation; prints an abort notice and returns otherwise.
+# Usage: _exit  (inside a case/while loop)
+_exit() {
+	if _prompt_yes_no "Exit DDM?" "N"; then
+		exit 0
+	fi
+	_info "Exit aborted."
+	sleep .5
+}
+
+# ================== #
+# PLATFORM DETECTION #
+# ================== #
+
+# Returns 0 if running on an Android kernel (e.g. inside Termux or UserLAnd).
+_is_android() {
+	[[ "$(uname -r 2>/dev/null || true)" == *android* ]] ||
+		[[ "$(uname -a 2>/dev/null || true)" == *" Android"* ]] ||
+		[[ "$(uname -a 2>/dev/null || true)" == *android* ]]
+}
+
+# Returns 0 if xdg-open is available and a display environment is present.
+_can_launch() {
+	command -v xdg-open >/dev/null 2>&1 && \
+		{ [[ -n "${DISPLAY:-}" ]] || [[ -n "${WAYLAND_DISPLAY:-}" ]]; }
+}
+
+# ======================== #
+# PATH & WORKSPACE HELPERS #
+# ======================== #
+
+# Returns the configured workspace path from ddm.conf, expanding ~ if needed.
+_get_workspace_path() {
+	local path=""
+	path="$(_conf_get workspace 2>/dev/null || true)"
+	path="${path/#\~/$HOME}"
+	path="${path%/}"
+	echo "${path:-not set}"
+}
+
+# Validates that a path is safe for DDM workspace operations.
+# Allows: $HOME/*, /mnt/*, /media/*
+# Blocks: /, /root, /home, /etc, /usr, /var, and other system directories.
+_validate_ddev_path() {
+	local path="$1"
+	path="${path/#\~/$HOME}"
+
+	local dangerous_paths=("/" "/root" "/home" "/etc" "/usr" "/var" "/opt" "/bin" "/sbin" "/lib" "/lib64" "/boot" "/sys" "/proc" "/dev")
+	for dangerous in "${dangerous_paths[@]}"; do
+		if [[ "$path" == "$dangerous" ]]; then
+			_error "Dangerous path detected: $path"
+			_error "This path is not allowed for DDM workspace"
+			return 1
+		fi
+	done
+
+	if [[ "$path" != "$HOME/"* && "$path" != "/mnt/"* && "$path" != "/media/"* ]]; then
+		_error "Path must be inside HOME, /mnt, or /media: $path"
+		return 1
+	fi
+	return 0
+}
+
+# Installs src to DDM_BIN atomically (install -m 755) and prints feedback.
+# Usage: _install_ddm <src> <label>
+#   src   — path of the file to install
+#   label — past-tense verb shown in the success line (e.g. "Installed", "Replaced", "Updated")
+_install_ddm() {
+	local src="$1" label="$2"
+	install -m 755 "$src" "$DDM_BIN"
+	_done "$label: '~/.local/bin/ddm'"
+}
+
+# ============================================== #
+# SYSTEM CHECK: runs once at every ddm launch    #
+# Order: updates > platform guards > PATH/copy   #     
+# > deps > docker > ddev > workspace > telemetry #
+# ============================================== #
+check_system() {
+	local default_path="$HOME/ddev-projects"
+	mkdir -p "$DDM_CONFIG_DIR"
+
+	# PLATFORM GUARDS
+	# Hard exits for unsupported environments.
+
+	# Require Bash 4.3+ (local -n nameref, used by _parse_type_entry).
+	if (( BASH_VERSINFO[0] < 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3 ) )); then
+		printf '[✗] Bash 4.3 or newer is required (current: %s)\n' "$BASH_VERSION" >&2
+		printf '    Please upgrade Bash and re-run ddm.\n' >&2
+		exit 1
+	fi
+
+	# Termux is not supported (lacks a full Linux container runtime).
+	if [[ -n "${TERMUX_VERSION:-}" ]] || [[ -d "/data/data/com.termux" ]]; then
+		_error "Termux is not supported"
+		_info "DDEV requires a full Linux environment (desktop/server Linux)."
+		_say "$B" "DDEV isn't reliably installable on Termux, so Termux isn't supported."
+		exit 1
+	fi
+
+	# macOS is not supported yet.
+	if [[ "$(uname)" == "Darwin" ]]; then
+		_error "macOS is not supported yet."
+		_info "ddm currently supports Linux only."
+		_say "$B" "I can't test it on macOS, so I can't support it."
+		exit 1
+	fi
+
+	# PATH & INSTALL
+	# Only relevant when running from outside ~/.local/bin/ddm.
+	local script_path script_name
+	script_path="$(realpath "$0")"
+	script_name="$(basename "$script_path")"
+
+	# Auto-heal: if install_skip was set but the user has since manually
+	# installed ddm (DDM_BIN exists and PATH is configured), the flag is
+	# obsolete — remove it silently so updates and menus work normally.
+	if [[ -n "$(_conf_get install_skip)" ]] && [[ -f "$DDM_BIN" ]]; then
+		local _path_ok=false
+		[[ ":$PATH:" == *":$HOME/.local/bin:"* ]] && _path_ok=true
+		if [[ "$_path_ok" == false ]]; then
+			for _f in "$HOME/.bashrc" "$HOME/.zshrc"; do
+				grep -qE "^[^#]*[$]HOME/.local/bin" "$_f" 2>/dev/null && _path_ok=true && break
+			done
+		fi
+		if [[ "$_path_ok" == true ]]; then
+			_conf_set "install_skip" ""
+		fi
+	fi
+
+	if [[ "$script_path" != "$DDM_BIN" ]] && [[ -z "$(_conf_get install_skip)" ]]; then
+
+		# Detect shell rc files
+		local rc_files=()
+		[[ -f "$HOME/.bashrc" ]] && rc_files+=("$HOME/.bashrc")
+		[[ -f "$HOME/.zshrc"  ]] && rc_files+=("$HOME/.zshrc")
+
+		# Check PATH
+		local path_in_rc=false need_path=false
+		for f in "${rc_files[@]}"; do
+			grep -qE "^[^#]*[$]HOME/.local/bin" "$f" 2>/dev/null && path_in_rc=true && break
+		done
+		[[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && ! $path_in_rc && need_path=true
+
+		# Check file
+		local need_copy=false need_replace=false hash_existing="" hash_current=""
+		if [[ ! -f "$DDM_BIN" ]]; then
+			need_copy=true
+		else
+			hash_existing="$(md5sum "$DDM_BIN" 2>/dev/null | cut -d' ' -f1)"
+			hash_current="$(md5sum "$script_path" 2>/dev/null | cut -d' ' -f1)"
+			[[ "$hash_existing" != "$hash_current" ]] && need_replace=true
+		fi
+
+		# Shows file diff info and prompts to replace DDM_BIN with script_path.
+		# Uses hash_existing/hash_current/script_name from the enclosing scope.
+		_offer_replace() {
+			local existing_date existing_size current_date current_size
+			existing_date="$(date -r "$DDM_BIN"    "+%Y-%m-%d %H:%M" 2>/dev/null || echo "unknown")"
+			existing_size="$(du -h "$DDM_BIN"       2>/dev/null | cut -f1 || echo "unknown")"
+			current_date="$(date -r "$script_path"  "+%Y-%m-%d %H:%M" 2>/dev/null || echo "unknown")"
+			current_size="$(du -h "$script_path"    2>/dev/null | cut -f1 || echo "unknown")"
+			_nl
+			_warn "ddm in '~/.local/bin' differs from this file."
+			_say "" "Installed : $existing_date  $existing_size  $(basename "$DDM_BIN")"
+			_say "" "md5       : $hash_existing"
+			_say "" "This file : $current_date  $current_size  $script_name"
+			_say "" "md5       : $hash_current"
+			_nl
+			if _prompt_yes_no "Replace installed file with '$script_name'?" "Y"; then
+				_install_ddm "$script_path" "Replaced"
+				_info "File '~/.local/bin/ddm' is up to date."
+				_say "$B" "Next launch will use the new version."
+				return 0
+			fi
+			return 1
+		}
+
+		# ── Case 1: PATH or file missing > setup (skippable) ──
+		if $need_path || $need_copy; then
+			clear
+			_printbox "$Y" "PATH Setup"
+			if $need_path; then
+				_warn "\$HOME/.local/bin is not in your PATH."
+				if ((${#rc_files[@]})); then
+					local _rc_label=""
+					for f in "${rc_files[@]}"; do
+						_rc_label+="${_rc_label:+ + }$(basename "$f")"
+					done
+					_say "$B" "Will add to: \$HOME/$_rc_label"
+				else
+					_say "$B" "No shell config found — add manually."
+				fi
+			else
+				_done "PATH is already set."
+			fi
+			if $need_copy; then
+				_warn "ddm is not installed in ~/.local/bin."
+				_say "$B" "Will install: $script_name → ~/.local/bin/ddm"
+			fi
+			if _prompt_yes_no "Proceed?" "Y"; then
+				if $need_path && ((${#rc_files[@]})); then
+					local path_line="# added by ddm\nexport PATH=\"\$HOME/.local/bin:\$PATH\""
+					for f in "${rc_files[@]}"; do
+						if ! grep -qE "^[^#]*[$]HOME/.local/bin" "$f" 2>/dev/null; then
+							printf '%b\n' "$path_line" >> "$f"
+							_done "Updated $f"
+						fi
+					done
+				fi
+				if $need_copy; then
+					_nl
+					mkdir -p "$HOME/.local/bin"
+					_install_ddm "$script_path" "Installed"
+				elif $need_replace; then
+					_offer_replace
+				fi
+				
+				if $need_path; then
+					_nl
+					_info "To apply changes, run one of:"
+					_say "$G" "source ~/.bashrc   (or ~/.zshrc)"
+					_say "$B" "Or open a new terminal — then run: ddm"
+				fi
+			else
+				_conf_set "install_skip" "true"
+				_info "Skipped. To be asked again, run:"
+				_say "$Y" "$script_path -r"
+			fi
+			_presskey "continue"
+
+		# ── Case 2: PATH ok + file different > offer update ──
+		elif $need_replace; then
+			_offer_replace
+			_presskey "continue"
+			# Silent: main if rejected
+
+		# ── Case 3: everything ok ──
+		fi
+	fi
+
+	# Auto update check (non-blocking, throttled to UPDATE_INTERVAL).
+	# Requires DDM_BIN and PATH — without both, update has no valid target.
+	if [[ -f "$DDM_BIN" ]] && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
+		check_updates
+	fi
+
+	# DEPENDENCIES: Detect package manager and install any missing CLI tools.
+	local pkg_mgr="" pm_name=""
+	local -a pm_update=() pm_install=() required=(jq curl grep awk unzip column) missing_cmds=() missing_pkgs=()
+
+	if command -v pacman >/dev/null 2>&1; then
+		pkg_mgr="pacman"
+	elif command -v apt >/dev/null 2>&1; then
+		pkg_mgr="apt"
+	elif command -v dnf >/dev/null 2>&1; then
+		pkg_mgr="dnf"
+	elif command -v zypper >/dev/null 2>&1; then
+		pkg_mgr="zypper"
+	fi
+
+	case "$pkg_mgr" in
+	pacman)
+		pm_name="pacman"
+		pm_install=(sudo pacman -Syu --needed)
+		;;
+	apt)
+		pm_name="apt"
+		pm_update=(sudo apt update)
+		pm_install=(sudo apt install -y)
+		;;
+	dnf)
+		pm_name="dnf"
+		pm_install=(sudo dnf install -y)
+		;;
+	zypper)
+		pm_name="zypper"
+		pm_install=(sudo zypper install -y)
+		;;
+	*)
+		pm_name=""
+		;;
+	esac
+
+	_die_say() { _error "$1"; shift; _say "$@"; exit 1; }
+
+	_install_pkgs() {
+		local question="$1"; shift
+		local -a pkgs=("$@")
+		if ((${#pm_update[@]})); then
+			_say "$Y" "${pm_update[*]}"
+		fi
+		_say "$Y" "${pm_install[*]} ${pkgs[*]}"
+		_nl
+		if ! _prompt_yes_no "$question" "Y"; then
+			_info "Run the command above to install manually."
+			exit 1
+		fi
+		if ((${#pm_update[@]})); then
+			_info "Updating package index..."
+			"${pm_update[@]}" || _die_say "Update failed" "${pm_update[@]}"
+			_nl
+		fi
+		_info "Installing: ${pkgs[*]}"
+		"${pm_install[@]}" "${pkgs[@]}" || _die_say "Installation failed" "${pm_install[@]}" "${pkgs[@]}"
+		_done "Done."
+	}
+
+	for c in "${required[@]}"; do
+		command -v "$c" >/dev/null 2>&1 || {
+			missing_cmds+=("$c")
+			case "$c" in
+			awk)    missing_pkgs+=("gawk") ;;
+			column) missing_pkgs+=("util-linux") ;;
+			*)      missing_pkgs+=("$c") ;;
+			esac
+		}
+	done
+
+	if ((${#missing_cmds[@]})); then
+		clear
+		_printbox "$R" "Missing required tool(s): ${missing_cmds[*]}"
+		if [[ -z "$pkg_mgr" ]]; then
+			_info "Cannot detect a supported package manager."
+			_info "Install these packages manually, then re-run:"
+			printf "%s\n" "  Suggested packages: ${missing_pkgs[*]}"
+			exit 1
+		fi
+		_info "Detected package manager: ${pm_name}"
+		_install_pkgs "Install missing tools now?" "${missing_pkgs[@]}"
+		_presskey "continue"
+	fi
+
+	# DOCKER: Install if missing, then verify the daemon is accessible.
+	if ! command -v docker >/dev/null 2>&1; then
+		clear
+		_printbox "$R" "Docker is not installed (required)"
+		if [[ -z "$pkg_mgr" ]]; then
+			_error "Cannot detect package manager"
+			_info "Install Docker manually from: ${DOCKER_DOCS_URL}"
+			exit 1
+		fi
+		if [[ "$pkg_mgr" == "pacman" ]]; then
+			_info "Docker Installation - ${Y}(Arch/Manjaro)${NC}"
+			_say "$B" "Packages: docker docker-compose docker-buildx"
+			_install_pkgs "Install Docker now?" docker docker-compose docker-buildx
+		else
+			_info "Installing via Docker convenience script."
+			_say "$Y" "$DOCKER_INSTCMD"
+			_nl
+			if ! _prompt_yes_no "Install Docker now?" "Y"; then
+				_warn "Docker installation cancelled"
+				_say "" "${DOCKER_DOCS_URL}"
+				exit 1
+			fi
+			if ! (curl -fsSL "$DOCKER_INSTURL" -o get-docker.sh && sudo sh get-docker.sh); then
+				rm -f get-docker.sh
+				_error "Installation failed"
+				exit 1
+			fi
+			rm -f get-docker.sh
+			_done "Docker installed!"
+		fi
+		_presskey "continue"
+	fi
+
+	# If Docker is not accessible, enable the service and add the user to the docker
+	# group in a single pass, then prompt for session restart to apply both changes.
+	if ! docker ps >/dev/null 2>&1; then
+		clear
+		_printbox "$R" "Docker is not accessible for: ${USER:-unknown}"
+		if command -v sudo >/dev/null 2>&1 && [[ -n "${USER:-}" ]]; then
+			_info "The following commands will be executed:"
+			_say "$Y" "sudo systemctl enable --now docker"
+			_say "$Y" "sudo usermod -aG docker $USER"
+			_nl
+			if _prompt_yes_no "Enable Docker service and add '$USER' to the docker group now?" "Y"; then
+				sudo systemctl enable --now docker >/dev/null 2>&1 || _warn "Could not enable Docker service. Try manually: sudo systemctl enable --now docker"
+				if sudo usermod -aG docker "$USER"; then
+					_done "Docker service enabled and user '$USER' added to the docker group."
+				else
+					_error "Failed to add user to docker group. Run manually: sudo usermod -aG docker ${USER}"
+				fi
+				_nl
+				if _prompt_yes_no "Apply changes now with 'newgrp docker' (recommended)?" "Y"; then
+					exec newgrp docker
+				else
+					_info "Log out or reboot, then re-run ddm."
+				fi
+			else
+				_info "Run the commands above manually, then re-run ddm."
+			fi
+		fi
+		exit 1
+	fi
+
+	# DDEV: Install if missing
+	if ! command -v ddev >/dev/null 2>&1; then
+		clear
+		_printbox "$R" "DDEV is not installed (required)"
+		_info "Install via DDEV install script."
+		_say "$Y" "$DDEV_INSTCMD"
+		_nl
+		if command -v yay >/dev/null 2>&1; then
+			_info "Arch hint: yay -S ddev-bin"
+		elif command -v paru >/dev/null 2>&1; then
+			_info "Arch hint: paru -S ddev-bin"
+		fi
+		if ! _prompt_yes_no "Install via install script?" "Y"; then
+			_warn "DDEV installation cancelled"
+			_say "" "${DDEV_DOCS_URL}"
+			exit 1
+		fi
+		_info "Installing DDEV..."
+		_nl
+		if (set -o pipefail; curl -fsSL "$DDEV_INSTURL" | bash); then
+			_done "DDEV installed successfully!"
+			_presskey "continue"
+		else
+			_error "DDEV installation failed"
+			exit 1
+		fi
+	fi
+
+	# WORKSPACE
+	# Configure projects directory on first run.
+	# On Android, enforce a fixed safe path.
+	if [[ -z "$(_conf_get workspace)" ]]; then
+		clear
+		_printbox "$Y" "Workspace Setup"
+		_info "This will only appear once."
+		_nl
+		if _is_android; then
+			_warn "Android environment detected."
+			_info "For stability, ddm uses a fixed workspace inside HOME:"
+			_say "" "$default_path"
+			mkdir -p "$default_path"
+			_conf_set "workspace" "$default_path"
+			_done "Workspace set and ready."
+		else
+			local input_path=""
+			while true; do
+				read -r -p "Enter DDEV projects directory [$default_path]: " input_path
+				input_path="${input_path:-$default_path}"
+				input_path="${input_path/#\~/$HOME}"
+				if _validate_ddev_path "$input_path"; then break; fi
+				_nl; _error "Please choose a safe path"; _nl
+			done
+			mkdir -p "$input_path"
+			_conf_set "workspace" "$input_path"
+			_done "Workspace set to: $input_path"
+		fi
+		_presskey "continue"
+	fi
+
+	# Android only: if config exists but points to a non-allowed path, force reset.
+	if _is_android; then
+		local configured=""
+		configured="$(_conf_get workspace 2>/dev/null || true)"
+		configured="${configured/#\~/$HOME}"
+		if [[ "$configured" != "$default_path" ]]; then
+			clear
+			_printbox "$R" "Android Workspace Reset"
+			_error "Android environment: custom workspace paths are disabled."
+			_nl
+			_info "Configured path:"; _say "$Y" "$configured"; _nl
+			_info "Allowed path (fixed for stability):"; _say "$G" "$default_path"; _nl
+			_warn "Reason: shared mounts (e.g. /mnt/shared)"
+			_say "$B" "may cause crashes or file permission issues."
+			_nl
+			if _prompt_yes_no "Rewrite workspace to the allowed path now?" "Y"; then
+				_conf_set "workspace" "$default_path"
+				_done "Workspace reset to: $default_path"
+				_presskey "continue"
+			else
+				exit 1
+			fi
+		fi
+	fi
+
+	DDEV_DIR="$(_get_workspace_path)"
+	if ! _validate_ddev_path "$DDEV_DIR"; then
+		_error "Configured path is not safe: $DDEV_DIR"
+		_error "Please reset with: ddm -r"
+		exit 1
+	fi
+	if [[ ! -d "$DDEV_DIR" ]]; then
+		mkdir -p "$DDEV_DIR" || { _error "Failed to create $DDEV_DIR. Check permissions."; exit 1; }
+	fi
+
+	# TELEMETRY: Ask once on first run whether to enable DDEV telemetry.
+	if [[ -z "$(_conf_get telemetry)" ]]; then
+		clear
+		_printbox "$Y" "DDEV Telemetry"
+		_info "This will only appear once."
+		_nl
+		_info "DDEV collects anonymous usage data to improve the project."
+		_say "$B" "https://ddev.com/privacy-policy/"
+		_nl
+		if _prompt_yes_no "Enable DDEV telemetry?" "Y"; then
+			ddev config global --instrumentation-opt-in=true >/dev/null 2>&1
+			_conf_set "telemetry" "true"
+			_done "Telemetry enabled."
+		else
+			ddev config global --instrumentation-opt-in=false >/dev/null 2>&1
+			_conf_set "telemetry" "false"
+			_done "Telemetry disabled."
+		fi
+		_presskey "start ddm"
+	fi
+}
+
+# ==================== #
+# PROJECT TYPE HELPERS #
+# ==================== #
+
+# Generic field resolver from PROJECT_TYPES by project name prefix.
+# Usage: _type_field_from_prefix "<name>" "<field>"
+# Valid fields: key | label | prefix | cat | admin
+# Falls back to the raw prefix for "label" when not found; empty for all others.
+_type_field_from_prefix() {
+	local name="$1" field="$2" entry
+	local prefix="${name%%-*}"
+	local -A t
+	for entry in "${PROJECT_TYPES[@]}"; do
+		_parse_type_entry "$entry" t
+		if [[ "${t[prefix]}" == "$prefix" ]]; then
+			echo "${t[$field]:-}"
+			return 0
+		fi
+	done
+	[[ "$field" == "label" ]] && echo "$prefix"
+}
+
+# Resolves the display label for a project from its name prefix.
+# Usage: label=$(_type_label_from_prefix "wp-mysite")  -->  "WordPress"
+_type_label_from_prefix() { _type_field_from_prefix "$1" "label"; }
+
+# Resolves the admin URL path for a project from its name prefix.
+# Returns empty string if no admin path is defined.
+# Usage: path=$(_get_admin_path "wp-mysite")  -->  "/wp-admin"
+_get_admin_path() { _type_field_from_prefix "$1" "admin"; }
+
+# ============ #
+# DDEV QUERIES #
+# ============ #
+
+# Cache 'ddev list --json-output' during a single menu render to avoid repeated calls.
+# Call _invalidate_ddev_cache() after actions that change project state.
+_DDEV_LIST_CACHE=""
+
+_invalidate_ddev_cache() {
+	_DDEV_LIST_CACHE=""
+}
+
+# Returns the cached JSON output of 'ddev list', fetching it on first call.
+_ddev_list_json() {
+	if [[ -z "$_DDEV_LIST_CACHE" ]]; then
+		_DDEV_LIST_CACHE="$(ddev list --json-output 2>/dev/null || true)"
+	fi
+	printf "%s\n" "$_DDEV_LIST_CACHE"
+}
+
+# Returns a pipe-delimited list of all DDEV projects: name|status|type|path
+_get_ddev_projects() {
+	_ddev_list_json |
+		jq -r '
+			(if (.raw | type) == "array" then .raw else (.[] // []) end) // []
+			| .[]
+			| [
+				.name // "",
+				.status // "",
+				(.type // .project_type // .apptype // ""),
+				(.approot // .location // .path // "")
+			] | @tsv
+		' |
+		awk -F'\t' 'NF == 4 && $1 != "" { print $1 "|" $2 "|" $3 "|" $4 }' ||
+		true
+}
+
+# Returns 0 if at least one project in the given raw list is running.
+# Usage: _has_running_projects "$projects_raw"
+_has_running_projects() {
+	local projects_raw="$1"
+	[[ -z "$projects_raw" ]] && return 1
+	printf '%s\n' "$projects_raw" | grep -q "|running|"
+}
+
+# Returns the status string for a single project (e.g. "running", "stopped").
+_get_project_status() {
+	local name="$1"
+	_ddev_list_json |
+		jq -r --arg n "$name" '(.raw // .)[] | select(.name == $n) | .status // ""' 2>/dev/null ||
+		true
+}
+
+# Returns the filesystem path of the project root directory.
+_get_project_path() {
+	local name="$1"
+	_ddev_list_json |
+		jq -r --arg n "$name" \
+			'(.raw // .)[] | select(.name == $n) | .approot // .location // .path // ""' \
+			2>/dev/null ||
+		true
+}
+
+# Returns 0 if the project has a database container configured.
+# Checks .ddev/config.yaml: if "- db" appears in any list (typically omit_containers), returns 1.
+# Defaults to true (all project types in this tool include a DB unless explicitly omitted).
+_project_has_db() {
+	local name="$1"
+	local path=""
+	path="$(_get_project_path "$name")"
+	[[ -z "$path" ]] && return 1
+	local config="$path/.ddev/config.yaml"
+	[[ ! -f "$config" ]] && return 0 # Config not found; assume DB present.
+	# If "- db" is listed in any YAML list, assume no database.
+	if grep -qE '^[[:space:]]*-[[:space:]]*db([[:space:]]|$)' "$config" 2>/dev/null; then
+		return 1
+	fi
+	return 0
+}
+
+# =============== #
+# PROJECT DISPLAY #
+# =============== #
+
+# Prints the project primary URL, admin URL (from registry), and add-on URLs.
+# Note: calls 'ddev describe' directly rather than the list cache because
+# describe returns richer data (service URLs, endpoints) not in ddev list.
+_show_project_urls() {
+	local name="$1"
+	local project_json="" data="" admin_path="" primary_url="" pma_url="" adminer_url="" mailpit_url=""
+
+	project_json="$(ddev describe "$name" -j 2>/dev/null)"
+
+	if [[ -z "$project_json" ]] || [[ "$project_json" == "null" ]]; then
+		_error "Could not retrieve info for: $name"
+		return 1
+	fi
+
+	data="$(printf '%s\n' "$project_json" | jq -r '
+		[
+			(.raw.primary_endpoint // .primary_endpoint),
+			(.raw.services.phpmyadmin.https_url // .raw.services.phpmyadmin.http_url),
+			(.raw.services.adminer.https_url // .raw.services.adminer.http_url),
+			(.raw.services.mailpit.https_url // .raw.services.mailpit.http_url)
+		] | map(select(. != null) // "") | join("|")
+	')"
+
+	IFS='|' read -r primary_url pma_url adminer_url mailpit_url <<<"$data"
+
+	printf "%s\n\n" "${B}URLs ($name):${NC}"
+
+	[[ -z "$primary_url" ]] && primary_url="https://$name.ddev.site"
+	_info "Home:"
+	_say "$B" "${B}$primary_url${NC}"
+
+	admin_path="$(_get_admin_path "$name")"
+
+	# PrestaShop uses a randomized admin folder name — detect it dynamically.
+	local prefix="${name%%-*}"
+	if [[ "$prefix" == "ps" && -n "$admin_path" ]]; then
+		local project_root="$DDEV_DIR/$name"
+		local real_admin=""
+		real_admin="$(find "$project_root" -maxdepth 1 -type d -name 'admin*' 2>/dev/null | head -1)"
+		if [[ -n "$real_admin" ]]; then
+			admin_path="/${real_admin##*/}"
+		else
+			admin_path=""
+			_info "Admin (run browser setup first):"
+			_say "$B" "${B}Visit Home URL to complete installation.${NC}"
+		fi
+	fi
+	if [[ -n "$admin_path" ]]; then
+		_info "Admin:"
+		_say "$B" "${B}${primary_url}${admin_path}${NC}"
+	fi
+
+	[[ -n "$pma_url" ]] && {
+		_info "PMA(db):"
+		_say "" "${B}${pma_url}${NC}"
+	}
+	[[ -n "$adminer_url" ]] && {
+		_info "Adminer:"
+		_say "" "${B}${adminer_url}${NC}"
+	}
+	[[ -n "$mailpit_url" ]] && {
+		_info "Mailpit:"
+		_say "" "${B}${mailpit_url}${NC}"
+	}
+}
+
+# ===================== #
+# PROJECT SETUP HELPERS #
+# ===================== #
+
+# Creates the project directory under DDEV_DIR and changes into it.
+# Called first by every install_* function.
+_setup_project_dir() {
+	local name="$1"
+	local project_path="$DDEV_DIR/$name"
+	_info "Creating project directory: $project_path"
+	mkdir -p "$project_path" || {
+		_error "Cannot create directory"
+		return 1
+	}
+	cd "$project_path" || {
+		_error "Cannot access directory"
+		return 1
+	}
+	_done "Project directory ready"
+}
+
+# Starts DDEV and reports failure with a consistent message.
+# Usage: _ddev_start || return 1
+_ddev_start() {
+	ddev start -y || {
+		_error "DDEV start failed"
+		return 1
+	}
+}
+
+# ============== #
+# PROJECT GUARDS #
+# ============== #
+
+# Ensures a project is running before performing an action that requires it.
+# Offers to start the project if it is currently stopped.
+#
+# Return codes:
+#   0 - project was already running
+#   2 - project was just started by this function
+#   1 - user declined to start, or start failed
+_ensure_running() {
+	local name="$1"
+	local status
+	status="$(_get_project_status "$name")"
+
+	if [[ "$status" == "running" ]]; then
+		return 0
+	fi
+
+	_say "$Y" "Project is not running (status: ${Y}$status${NC})"
+	if _prompt_yes_no " ${G}>${NC}  Start $name now?" "Y"; then
+		if project_start "$name"; then
+			return 2
+		fi
+		clear
+	else
+		_say "" "Aborted by user..."
+		sleep 1
+	fi
+	return 1
+}
+
+# =============== #
+# PROJECT ACTIONS #
+# =============== #
+
+# Runs 'ddev describe' and waits for a keypress before returning.
+project_describe() {
+	local name="$1"
+	_printbox "$C" "ddev describe for $name"
+	ddev describe "$name"
+	_presskey "return"
+}
+
+# Starts a stopped project. No-ops silently if already running.
+project_start() {
+	local name="$1"
+
+	_printbox "$G" "Start: $name"
+	_info "Please be patient..."
+	_say "$G" "ddev start $name"
+	_nl
+
+	if ddev start "$name"; then
+		_invalidate_ddev_cache
+		_done "Started: $name"
+		_presskey
+		return 0
+	fi
+
+	_error "Start failed: $name"
+	_troubleshoot
+	_presskey
+	return 1
+}
+
+# Stops a running project. No-ops silently if already stopped.
+project_stop() {
+	local name="$1"
+	_printbox "$Y" "Stop: $name"
+	_info "Please be patient..."
+	_say "$Y" "ddev stop $name"
+	_nl
+
+	if ddev stop "$name"; then
+		_invalidate_ddev_cache
+		_done "Stopped: $name"
+		_presskey
+		return 0
+	fi
+
+	_error "Stop failed: $name"
+	_presskey
+	return 1
+}
+
+# Restarts a project, starting it first if necessary.
+project_restart() {
+	local name="$1"
+	local res
+	_ensure_running "$name"
+	res=$?
+	[[ $res -eq 1 ]] && return 1 # User declined or start failed.
+	[[ $res -eq 2 ]] && return 0 # Project was just started; restart not needed.
+	_printbox "$Y" "Restart: $name"
+	_info "Please be patient..."
+	_say "$Y" "ddev restart $name"
+	_nl
+	if ddev restart "$name"; then
+		_invalidate_ddev_cache
+		_done "Restarted: $name"
+		_presskey
+		return 0
+	fi
+
+	_error "Restart failed: $name"
+	_presskey
+	return 1
+}
+
+# Opens the project in the default browser via 'ddev launch'.
+# Starts the project first if it is not running.
+project_open() {
+	local name="$1"
+	local path res
+	_nl
+	path="$(_get_project_path "$name")"
+	[[ -z "$path" ]] && {
+		_error "Project not found: $name"
+		return 1
+	}
+	_ensure_running "$name"
+	res=$?
+	[[ $res -eq 1 ]] && return 1 # User declined or start failed.
+	cd "$path" || {
+		_error "Cannot access: $path"
+		return 1
+	}
+
+	_info "Launching browser for: $name"
+	if ddev launch 2>/dev/null; then
+		return 0
+	fi
+	_warn "Browser launch failed (ddev launch error)"
+	return 1
+}
+
+# Opens an SSH terminal inside the project web container.
+project_ssh() {
+	local name="$1"
+	local res
+	_ensure_running "$name"
+	res=$?
+	[[ $res -eq 1 ]] && return 1 # User declined or start failed.
+	clear
+	_printbox "$C" "Opening terminal for: $name..."
+	_info "Type exit when finished..."
+	ddev ssh "$name"
+	clear # Clean up output on exit.
+}
+
+# Drops and recreates the project database after explicit typed confirmation.
+# If the project is stopped, starts it temporarily for database access,
+# then restores the stopped state afterward.
+project_wipedb() {
+	local name="$1"
+	local path="" status wipe_label
+	local started_by_us=0
+	status="$(_get_project_status "$name")"
+
+	path="$(_get_project_path "$name")"
+	[[ -z "$path" ]] && {
+		_error "Project not found: $name"
+		return 1
+	}
+
+	wipe_label="$(_type_label_from_prefix "$name")"
+
+	clear
+	_printbox "$R" "WIPE DATABASE: $name${wipe_label:+ ($wipe_label)}"
+	_warn "This will PERMANENTLY delete all data in the database."
+	_warn "Configuration and files will not be touched."
+	_nl
+
+	if ! _prompt_yes_no "Wipe database for '$name'?" "N"; then
+		_info "Wipe database aborted..."
+		sleep 1
+		return 1
+	fi
+
+	if [[ "$status" != "running" ]]; then
+		_info "Project is not running (status: $status), starting temporarily..."
+		ddev start "$name" &>/dev/null || {
+			_error "Could not start DDEV for database access"
+			return 1
+		}
+		started_by_us=1
+	fi
+
+	cd "$path" || {
+		_error "Cannot access: $path"
+		return 1
+	}
+
+	_info "Wiping database..."
+	if ddev mysql -e "DROP DATABASE IF EXISTS db; CREATE DATABASE db;"; then
+		_invalidate_ddev_cache
+		_done "Database for '$name' has been wiped!"
+		_presskey
+	else
+		_error "Database wipe failed."
+		_presskey
+		return 1
+	fi
+
+	if [[ $started_by_us -eq 1 ]]; then
+		_info "Stopping project (was not running before)..."
+		ddev stop "$name" &>/dev/null
+	fi
+}
+
+# Removes a project from the DDEV registry (project directory is preserved).
+# Supports single-project and bulk ("DELETE_ALL_PROJECTS") modes.
+# Offers a choice between saving or discarding DDEV snapshots.
+project_delete() {
+	local target="${1:-}"
+	local display_name="$target" display_label="" path="" status choice="" snapshot_msg=""
+	local is_bulk=false
+	# Declare as local to prevent state leaking across repeated calls
+	# (extra_flags must not accumulate --omit-snapshot between invocations).
+	local -a extra_flags=()
+
+
+	if [[ "$target" == "DELETE_ALL_PROJECTS" ]]; then
+		is_bulk=true
+		display_name="ALL PROJECTS"
+	else
+		status="$(_get_project_status "$target")"
+		if [[ -z "$status" ]]; then
+			_error "Project not found: $target"
+			return 1
+		fi
+		display_label="$(_type_label_from_prefix "$target")"
+		display_name="$target${display_label:+ ($display_label)}"
+	fi
+
+	_printbox "$R" "DELETE: $display_name"
+
+	if [[ "$is_bulk" == true ]]; then
+		_warn "All projects will be removed from registry!"
+		_info "Project directories are NOT deleted:"
+		_info "To remove directories, use file manager or:"
+		_nl
+
+		_ddev_list_json 2>/dev/null |
+			jq -r '(.raw // .)[] | "\(.name)|\(.approot // .location // .path // "")"' 2>/dev/null |
+			while IFS='|' read -r name path; do
+				[[ -z "$name" ]] && continue
+
+				local label display_name
+				label="$(_type_label_from_prefix "$name")"
+				display_name="$name${label:+ ($label)}"
+
+				printf "%s\n" " *  ${G}${display_name}${NC}"
+
+				if [[ -z "$path" ]]; then
+					_warn "Path not found for: $display_name"
+					continue
+				fi
+				_say "" "${R}rm -rf \"$path\"${NC}"
+			done
+	else
+		_warn "${target} will be removed only from registry!"
+		_info "The project directory is NOT deleted:"
+		_info "To remove directory, use file manager or:"
+
+		printf "\n%s\n" " *  ${G}${display_name}${NC}"
+
+		path="$(_get_project_path "$target")"
+		if [[ -z "$path" ]]; then
+			_warn "Path not found for: $display_name"
+		else
+			_say "" "${R}rm -rf \"$path\"${NC}"
+		fi
+	fi
+
+	printf "\n%s\n" "Select deletion mode:"
+	printf "%s\n" "${Y}[1]${NC} Delete (SAVE snapshots)"
+	printf "%s\n\n" "${R}[2]${NC} Delete (OMIT snapshots - faster, data lost)"
+	printf "%s\n\n" "${M}[b]${NC}ack  [e]xit"
+	_nl
+
+	while true; do
+		choice="$(_read_input "Selection")"
+		case "$choice" in
+		1)
+			snapshot_msg="${G}Snapshots will be saved.${NC}"
+			break
+			;;
+		2)
+			extra_flags+=(--omit-snapshot)
+			snapshot_msg="${R}NO snapshots saved (data permanently lost).${NC}"
+			break
+			;;
+		b | back)
+			_back
+			return 0
+			;;
+		q | quit | e | x | exit)
+			_exit
+			;;
+		*)
+			_error "Invalid selection. Try again."
+			;;
+		esac
+	done
+
+	printf "\n%s\n" "Mode: $snapshot_msg"
+
+	if [[ "$is_bulk" == true ]]; then
+		_nl
+		if ! _prompt_yes_no "Are you ABSOLUTELY sure?" "N"; then
+			_info "Deletion cancelled."
+			sleep 1
+			return 0
+		fi
+
+		_info "Executing: ddev delete --all ${extra_flags[*]}"
+		_nl
+		if ddev delete --all "${extra_flags[@]}"; then
+			_invalidate_ddev_cache
+			_done "All projects removed from DDEV registry."
+			_presskey "return"
+		else
+			_error "An error occurred during bulk deletion."
+			_presskey "return"
+			return 1
+		fi
+	else
+		if ! _prompt_yes_no "Are you ABSOLUTELY sure you want to proceed?" "N"; then
+			_info "Deletion cancelled."
+			sleep 1
+			return 0
+		fi
+
+		_info "Executing deletion..."
+		if ddev delete "$target" -y "${extra_flags[@]}"; then
+			_invalidate_ddev_cache
+			_done "Project '$target' deleted."
+			_presskey
+		else
+			_error "An error occurred deleting '$target'."
+			_presskey
+			return 1
+		fi
+	fi
+}
+
+# Troubleshooting hints after failure
+_troubleshoot() {
+	_warn "Common fixes (depending on the message above):"
+	_say "$B" "If you see DNS/resolve/timeout errors: check /etc/resolv.conf or your network DNS (e.g. 1.1.1.1 / 8.8.8.8)."
+	_say "$B" "If you see bridge/veth errors: sudo modprobe bridge && sudo modprobe veth"
+	_say "$B" "If this started after a kernel update: reboot and retry."
+}
+
+# ================ #
+# BATCH OPERATIONS #
+# ================ #
+
+# Stops all currently running DDEV projects after user confirmation.
+stop_all() {
+	local projects_raw=""
+	local -a running_names=()
+	projects_raw="$(_get_ddev_projects)"
+	_printbox "$Y" "Stop All Running Projects"
+	_warn "This will stop all running DDEV projects."
+	_nl
+	while IFS='|' read -r name status _type _location; do
+		if [[ "$status" == "running" ]]; then
+			running_names+=("$name")
+			printf "%s\n" "${G}*${NC} $name"
+		fi
+	done <<<"$projects_raw"
+	_nl
+	if (( ${#running_names[@]} == 0 )); then
+		_info "No running projects found."
+		sleep .5
+		return 0
+	fi
+	if ! _prompt_yes_no "Proceed?" "Y"; then
+		_warn "Cancelled by user"
+		sleep .5
+		return 0
+	fi
+	_nl
+	_info "Please be patient..."
+	if ddev stop "${running_names[@]}"; then
+		_invalidate_ddev_cache
+		_done "All running projects stopped"
+		_presskey
+	else
+		_error "ddev stop failed (Is Docker running?)"
+		_info "Check status with: ddev list"
+		_presskey
+		return 1
+	fi
+}
+
+# ===== #
+# MENUS #
+# ===== #
+
+# Guides the user through selecting a project type and naming the project,
+# then delegates to the corresponding install_* function.
+create_project() {
+	while true; do
+		clear
+		_printbox "$C" "Create New Project"
+		printf "%s\n\n" "${B}Available Project Types:${NC}"
+
+		local i=1
+		local prev_cat=""
+		local -a indexed_entries=()
+		local -A t
+
+		for entry in "${PROJECT_TYPES[@]}"; do
+			_parse_type_entry "$entry" t
+			# Print category header when category changes
+			if [[ "${t[cat]}" != "$prev_cat" ]]; then
+				case "${t[cat]}" in
+				cms)       printf "%s\n" " ${M}───────── CMS ─────────${NC}" ;;
+				framework) printf "%s\n" " ${M}────── Framework ──────${NC}" ;;
+				extra)     printf "%s\n" " ${M}──────── Extra ────────${NC}" ;;
+				esac
+				prev_cat="${t[cat]}"
+			fi
+			printf " ${G}%2d)${NC} ${C}%s${NC}\n" "$i" "${t[label]}"
+			indexed_entries+=("$entry")
+			((i++))
+		done
+
+		printf "\n%s\n\n" " ${M}[b]${NC}ack   [e]xit"
+		_nl
+
+		local type_choice=""
+		local total="${#indexed_entries[@]}"
+
+		while true; do
+			type_choice="$(_read_input "Select type (1-${total})")"
+
+			case "$type_choice" in
+			q | quit | e | x | exit)
+				_exit
+				continue
+				;;
+			b | back)
+				_back
+				return 0
+				;;
+			esac
+
+			if [[ "$type_choice" =~ ^[0-9]+$ ]] &&
+				[[ "$type_choice" -ge 1 ]] &&
+				[[ "$type_choice" -le "$total" ]]; then
+				break
+			fi
+
+			_error "Invalid selection. Try again."
+		done
+
+		local selected_entry="${indexed_entries[$((type_choice - 1))]}"
+		_parse_type_entry "$selected_entry" t   # reuse t declared above
+
+		_nl
+		local project_name=""
+		local full_name=""
+		local project_path=""
+		while true; do
+			read -r -p "Project name (prefixed with '${t[prefix]}'): ${t[prefix]}-" project_name
+
+			case "$project_name" in
+			b | back)
+				_back
+				return 0
+				;;
+			q | quit | e | x | exit)
+				_exit
+				continue
+				;;
+			esac
+
+			project_name="$(echo "$project_name" | tr '[:upper:]' '[:lower:]' | tr -c '[:alnum:]-' '-' | sed -E 's/-+/-/g; s/^-|-$//g')"
+
+			if [[ -z "$project_name" ]]; then
+				_error "Name cannot be empty"
+				continue
+			fi
+
+			if [[ ! "$project_name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+				_error "Invalid name. Use only lowercase letters, numbers, and hyphens."
+				continue
+			fi
+
+			full_name="${t[prefix]}-$project_name"
+
+			# Check 1: project already registered in DDEV.
+			local existing_status
+			existing_status="$(_get_project_status "$full_name")"
+			if [[ -n "$existing_status" ]]; then
+				_warn "Project '$full_name' already exists [$existing_status]"
+				_info "Please choose a different name."
+				continue
+			fi
+
+			# Check 2: directory exists but project is not registered (orphaned).
+			project_path="$DDEV_DIR/$full_name"
+			if [[ -d "$project_path" ]]; then
+
+				if [[ -d "$project_path/.ddev" ]]; then
+					_warn "Directory exists but project not in DDEV: $project_path"
+					_info "Found DDEV configuration in directory."
+
+					if _prompt_yes_no "Re-import this project to DDEV?" "Y"; then
+						cd "$project_path" || {
+							_error "Cannot access directory"
+							continue
+						}
+
+						_info "Starting project to re-register with DDEV..."
+						if ddev start; then
+							_done "Project re-imported successfully!"
+							_show_project_urls "$full_name"
+							project_open "$full_name"
+							_presskey
+							return 0
+						else
+							_error "Failed to start project"
+							continue
+						fi
+					fi
+					continue
+				fi
+
+				_warn "Directory exists but has no DDEV config: $project_path"
+				printf "\n%s\n" "${G}[1]${NC} Reuse this directory (install into it)"
+				printf "%s\n" "${B}[2]${NC} Choose a different name or remove it manually:"
+				_say "$Y" "rm -rf \"$project_path\""
+				_nl
+				local dir_choice
+				dir_choice="$(_read_input "Choice [1/2]")"
+				case "$dir_choice" in
+				1)
+					_info "Reusing existing directory..."
+					break
+					;;
+				*)
+					continue
+					;;
+				esac
+			fi
+
+			break
+		done
+
+		_nl
+		_info "Creating: $full_name ($(_type_label_from_prefix "$full_name"))"
+		_nl
+		if ! _prompt_yes_no "Proceed?" "Y"; then
+			_warn "Cancelled by user"
+			return 0
+		fi
+
+		local install_func="install_${t[key]//-/_}"
+
+		if ! declare -f "$install_func" &>/dev/null; then
+			_error "Installer function not found: $install_func"
+			return 1
+		fi
+
+		if ! "$install_func" "$full_name"; then
+			_nl
+			_error "Installation failed for '$full_name'."
+			_troubleshoot
+			_nl
+			_presskey
+			return 1
+		fi
+		_nl
+		return 0
+	done
+}
+
+# Displays the interactive per-project menu and dispatches project actions.
+# The outer loop re-renders the menu after each action (status may have changed).
+# Inner loop: handles input without re-rendering.
+# - break    -> re-render the outer loop (refreshed status)
+# - return 0 -> exit back to the project list
+manage_project() {
+	local name="$1"
+
+	while true; do
+		clear
+		_invalidate_ddev_cache
+
+		local status
+		status="$(_get_project_status "$name")"
+
+		if [[ -z "$status" ]]; then
+			_error "Project not found: $name"
+			return 1
+		fi
+
+		local display_type
+		display_type="$(_type_label_from_prefix "$name")"
+
+		local boxcolor="$R"
+		[[ "$status" == "running" ]] && boxcolor="$G"
+		[[ "$status" == "paused" ]] && boxcolor="$Y"
+
+		_printbox "$boxcolor" "$name - $display_type [$status]"
+
+		_show_project_urls "$name"
+
+		local line1 line2=""
+		local wipe_action=""
+		_project_has_db "$name" && wipe_action="${R}[w]${NC}ipe(db)   "
+
+		local back_opt="${M}[b]${NC}ack   "
+
+		if [[ "$status" == "running" ]]; then
+			if _can_launch; then
+				line1="${G}[o]${NC}pen       ${Y}[s]${NC}top       ${Y}[r]${NC}estart   ${B}[i]${NC}nfo"
+			else
+				line1="${Y}[s]${NC}top       ${Y}[r]${NC}estart    ${B}[i]${NC}nfo"
+			fi
+			line2="${C}[t]${NC}erminal   ${wipe_action}${R}[d]${NC}elete    ${back_opt}[e]xit"
+		else
+			line1="${G}[s]${NC}tart  ${B}[i]${NC}nfo  ${wipe_action}${R}[d]${NC}elete"
+			line2="${back_opt}[e]xit"
+		fi
+
+		printf "\n%s\n" "$line1"
+		[[ -n "$line2" ]] && printf "%s\n" "$line2"
+		_nl
+
+		while true; do
+			local choice
+			choice="$(_read_input "Choice")"
+
+			case "$choice" in
+			o | open)
+				if _can_launch; then
+					project_open "$name"
+				else
+					_warn "Browser not available (xdg-open missing or no GUI session detected)."
+				fi
+				break
+				;;
+
+			i | info)
+				_info "Loading project info..."
+				sleep .5
+				clear
+				project_describe "$name"
+				break
+				;;
+
+			t | terminal | ssh)
+				_info "Opening terminal..."
+				sleep .5
+				clear
+				project_ssh "$name"
+				break
+				;;
+
+			s)
+				_info "Please be patient..."
+				sleep .5
+				clear
+				if [[ "$status" == "running" ]]; then
+					project_stop "$name"
+				else
+					project_start "$name"
+				fi
+				break
+				;;
+
+			start)
+				_info "Please be patient..."
+				sleep .5
+				if [[ "$status" == "running" ]]; then
+					_say "$B" "Project is already running: $name"
+					continue
+				else
+					clear
+					project_start "$name"
+					break
+				fi
+				;;
+			stop)
+				_info "Please be patient..."
+				sleep .5
+				if [[ "$status" != "running" ]]; then
+					_say "$Y" "Project is not running (status: ${Y}${status:-unknown}${NC})"
+					continue
+				else
+					clear
+					project_stop "$name"
+					break
+				fi
+				
+				;;
+
+			r | restart)
+				_info "Please be patient..."
+				sleep .5
+				clear
+				project_restart "$name"
+				break
+				;;
+
+			w | wipe)
+				_info "Wipe DB: loading..."
+				sleep .5
+				if ! _project_has_db "$name"; then
+					_warn "This project has no database."
+					continue
+				else
+					clear
+					project_wipedb "$name"
+					break
+				fi
+				;;
+
+			d | delete)
+				_info "Opening delete menu..."
+				sleep .5
+				clear
+				project_delete "$name"
+				return 0
+				;;
+
+			h | help)
+				_info "Opening help..."
+				sleep .5
+				clear
+				help
+				_presskey
+				break
+				;;
+
+			b | back)
+				_back
+				return 0
+				;;
+				
+			q | quit | e | x | exit) _exit ;;
+
+			*) _error "Invalid choice: '$choice'" ;;
+			esac
+		done
+	done
+}
+
+# ─── Tools menu helpers ─── #
+
+# Runs ddev poweroff and invalidates the project cache.
+_tools_poweroff() {
+	_printbox "$Y" "DDEV poweroff"
+	ddev poweroff || true
+	_invalidate_ddev_cache
+	_nl
+	_done "DDEV powered off."
+}
+
+# Cleans unused Docker images and build cache.
+# Projects and databases are NOT affected.
+_tools_docker_cleaner() {
+	local b_space
+	b_space="$(docker system df --format "{{.Size}}")"
+	_nl
+
+	_info "Step 1: Cleaning DDEV snapshots..."
+	_say "$Y" "ddev snapshot --cleanup --all"
+	ddev snapshot --cleanup --all || true
+	sleep .5
+	_nl
+
+	_info "Step 2: Cleaning DDEV images..."
+	_say "$Y" "ddev delete images -y"
+	ddev delete images -y || true
+	sleep .5
+	_nl
+
+	_info "Step 3: Cleaning inactive hostnames..."
+	_say "$Y" "ddev hostname --remove-inactive"
+	ddev hostname --remove-inactive || true
+	sleep .5
+	_nl
+
+	_info "Step 4: Docker system prune..."
+	_say "$Y" "docker system prune -f"
+	docker system prune -f
+	sleep .5
+	_nl
+
+	_done "Done! Space freed: $b_space -> $(docker system df --format "{{.Size}}")"
+}
+
+# Wipes all Docker containers, volumes, images and builder cache.
+_tools_docker_wipe() {
+	_info "Wiping containers, volumes and images..."
+	_say "$Y" "docker system prune -a --volumes -f"
+	docker system prune -a --volumes -f
+	sleep .5
+	_nl
+
+	_info "Wiping builder cache..."
+	_say "$Y" "docker builder prune -a -f"
+	docker builder prune -a -f
+	sleep .5
+	_nl
+
+	_info "Cleaning hostnames..."
+	_say "$Y" "ddev hostname --remove-inactive"
+	ddev hostname --remove-inactive || true
+	sleep .5
+}
+
+# ─── Tools menu ─── #
+
+# Displays the tools and maintenance menu.
+# Options form an escalation scale: each level includes the previous.
+#   [1] Poweroff
+#   [2] Poweroff + Docker Cleaner
+#   [3] Delete All Projects (if any)
+#   [n] Poweroff + Cleaner + Delete All (if any) + full Docker wipe
+tools_menu() {
+	while true; do
+		local projects_raw=""
+		projects_raw="$(_get_ddev_projects)"
+
+		local has_projects=false
+		local project_count=0
+		local nuclear_steps="1 + 2 + full Docker wipe."
+		if [[ -n "$projects_raw" ]]; then
+			has_projects=true
+			project_count="$(echo "$projects_raw" | wc -l)"
+			nuclear_steps="1 + 2 + 3 + full Docker wipe."
+		fi
+
+		_printbox "$M" "Tools & Maintenance"
+
+		# Disk usage shown automatically for context.
+		printf "%s\n" "${C}Docker disk usage:${NC}"
+		docker system df 2>/dev/null || _warn "Docker not accessible"
+		_nl
+
+		printf "%s\n" "${Y}[1] DDEV Poweroff (no confirm)${NC}"
+		_say "$B" "Stops containers, router and SSH agent."
+		_nl
+
+		printf "%s\n" "${Y}[2] Poweroff + Docker Cleaner${NC}"
+		_say "$B" "1 + Removes unused images and build cache."
+		_say "$B" "Projects and databases are safe."
+		_nl
+
+		if [[ "$has_projects" == true ]]; then
+			printf "%s\n" "${R}[3] Delete All Projects${NC}"
+			_say "$B" "Removes $project_count project(s) from DDEV registry."
+			_say "$B" "For safety, directories remain on disk."
+			_nl
+		fi
+
+		printf "%s\n" "${R}[n] Nuclear Reset${NC}"
+		_say "$B" "$nuclear_steps"
+		_say "$B" "Like reinstalling Docker from scratch."
+		_nl
+
+		printf "%s\n" "${M}[b]${NC}ack  [e]xit"
+		_nl
+
+		while true; do
+			local choice=""
+			choice="$(_read_input "Selection")"
+
+			case "$choice" in
+			1)
+				clear
+				_tools_poweroff
+				_presskey "return"
+				clear
+				break
+				;;
+
+			2)
+				clear
+				_printbox "$Y" "Poweroff + Docker Cleaner"
+				_info "Poweroff + Removes unused images and cache."
+				_info "Projects and databases are NOT affected."
+				_nl
+
+				if _prompt_yes_no "Proceed?" "N"; then
+					_nl
+					_tools_poweroff
+					_nl
+					_tools_docker_cleaner
+					_presskey "return"
+				else
+					_info "Step 2: Aborted."
+					sleep 1
+				fi
+				clear
+				break
+				;;
+
+			3)
+				if [[ "$has_projects" == true ]]; then
+					_info "Opening delete menu..."
+					sleep .5
+					clear
+					project_delete "DELETE_ALL_PROJECTS"
+					clear
+					break
+				else
+					_info "Item disabled: No projects available..."
+				fi
+				;;
+
+			n | nuclear)
+				clear
+				_printbox "$R" "NUCLEAR RESET"
+				_warn "This will DESTROY EVERYTHING:"
+				_say "$B" "Poweroff DDEV"
+				[[ "$has_projects" == true ]] && _say "$B" "Delete all projects from registry"
+				_say "$B" "Wipes all containers, volumes, images, networks"
+				_nl
+				_warn "This CANNOT be undone."
+				_nl
+
+				if _prompt_yes_no "Are you ABSOLUTELY sure?" "N"; then
+					local b_space
+					b_space="$(docker system df --format "{{.Size}}")"
+					_nl
+					_tools_poweroff
+					_nl
+
+					if [[ "$has_projects" == true ]]; then
+						_info "Removing all projects from registry..."
+						_say "$Y" "ddev delete --all --omit-snapshot"
+						ddev delete --all --omit-snapshot || true
+						_invalidate_ddev_cache
+					fi
+					sleep .5
+					_nl
+
+					_tools_docker_cleaner
+					_nl
+
+					_tools_docker_wipe
+
+					_done "Nuclear reset complete. Space: $b_space -> $(docker system df --format "{{.Size}}")"
+					_presskey "return"
+				else
+					_info "Nuclear: Aborted..."
+					sleep 1
+				fi
+				clear
+				break
+				;;
+
+			q | quit | e | x | exit)
+				_exit
+				;;
+
+			b | back)
+				_back
+				return 0
+				;;
+			*) _error "Invalid choice. Try again." ;;
+			esac
+		done
+	done
+}
+
+# ============== #
+# UPDATE CHECKER #
+# ============== #
+# Checks for a newer version of ddm on GitHub.
+# Automatic mode (force=false): respects UPDATE_INTERVAL throttle, silent on no update.
+# Manual mode    (force=true):  always checks and always shows a result.
+check_updates() {
+	local force="${1:-false}"
+	local remote_version="" temp_file="" docker_v=""
+	local ddev_installed="" ddev_latest="" ddev_after=""
+	local last_check="" now elapsed
+	docker_v="$(_docker_version)"
+	if [[ "$force" == false ]]; then
+		if [[ -f "$UPDATE_FILE" ]]; then
+			last_check="$(stat -c %Y "$UPDATE_FILE" 2>/dev/null || stat -f %m "$UPDATE_FILE" 2>/dev/null || echo 0)"
+			now="$(date +%s)"
+			elapsed=$((now - last_check))
+			[[ $elapsed -lt $UPDATE_INTERVAL ]] && return 0
+		fi
+	fi
+	touch "$UPDATE_FILE" 2>/dev/null
+	if [[ "$force" == true ]]; then
+		_printbox "$M" "$DDM_INFO - Check Updates"
+		_info "Checking for updates..."
+	fi
+	# ── ddm update check ── #
+	remote_version="$(curl -fsSL --max-time 3 "$UPDATE_URL" 2>/dev/null | grep '^DDM_VER=' | head -n 1 | cut -d'"' -f2)"
+	if [[ -z "$remote_version" ]]; then
+		if [[ "$force" == true ]]; then
+			_warn "Cannot check ddm updates (network issue?)"
+		fi
+	else
+		if [[ "$remote_version" != "$DDM_VER" ]]; then
+			_nl
+			_done "New version available: v$remote_version (current: v$DDM_VER)"
+			_nl
+			if _prompt_yes_no "Update now?" "Y"; then
+				_info "Downloading latest version..."
+				temp_file="$(mktemp)"
+				trap 'rm -f "$temp_file"' RETURN
+				if ! curl -fsSL "$UPDATE_URL" -o "$temp_file" || [[ ! -s "$temp_file" ]]; then
+					_error "Update failed: network error or empty file received"
+				else
+					# Only update the canonical install location.
+					# If ddm is not installed yet, ask the user to run it
+					# interactively first so check_system handles the setup.
+					if [[ ! -f "$DDM_BIN" ]]; then
+						_warn "ddm is not installed — update skipped."
+						_info "Run 'ddm' once (without flags) to install it first."
+					else
+						_install_ddm "$temp_file" "Updated to v$remote_version"
+						_info "Restart ddm to use the new version."
+						exit 0
+					fi
+				fi
+			fi
+		else
+			if [[ "$force" == true ]]; then
+				_done "ddm is already up to date (v$DDM_VER)"
+			fi
+		fi
+	fi
+	# ── DDEV update check
+	ddev_installed="$(_ddev_version)"
+	if [[ -n "$ddev_installed" ]]; then
+		ddev_latest="$(curl -fsSL --max-time 5 \
+			"https://api.github.com/repos/ddev/ddev/releases/latest" 2>/dev/null |
+			jq -r '.tag_name // empty')"
+		if [[ -n "$ddev_latest" && "$ddev_latest" != "$ddev_installed" ]]; then
+			_nl
+			_warn "DDEV update available: ${G}${ddev_latest}${NC} (current: ${ddev_installed})"
+			_say "$B" "https://docs.ddev.com/en/stable/users/install/ddev-upgrade/"
+			_nl
+			if _prompt_yes_no "Run 'ddev self-upgrade' now?" "Y"; then
+				ddev self-upgrade
+				ddev_after="$(_ddev_version)"
+				if [[ "$ddev_after" == "$ddev_latest" ]]; then
+					_done "DDEV upgraded to ${ddev_latest}!"
+				else
+					_nl
+					_warn "Automatic upgrade not available for your installation method."
+					_say "$Y" "$DDEV_INSTCMD"
+					_nl
+					if _prompt_yes_no "Run the install script now?" "Y"; then
+						_nl
+						_warn "This will stop all running DDEV projects."
+						if ! _prompt_yes_no "Run 'ddev poweroff' and proceed?" "Y"; then
+							_info "Upgrade cancelled — run manually:"
+							_say "$Y" "$DDEV_INSTCMD"
+						else
+							_info "Running 'ddev poweroff'..."
+							ddev poweroff || true
+							_nl
+							if (
+								set -o pipefail
+								curl -fsSL "$DDEV_INSTURL" | bash
+							); then
+								_done "DDEV upgraded to ${ddev_latest}!"
+							else
+								_error "Upgrade failed — run manually:"
+								_say "$Y" "$DDEV_INSTCMD"
+							fi
+						fi
+					else
+						_info "Run manually:"
+						_say "$Y" "$DDEV_INSTCMD"
+					fi
+				fi
+			fi
+			_presskey
+		elif [[ "$force" == true ]]; then
+			_done "DDEV is already up to date (${ddev_installed})"
+		fi
+	fi
+
+	if [[ "$force" == true ]]; then
+		_nl
+		_info "Docker: ${docker_v:-n/a}"
+		_say "$B" "updates are managed by your system package manager."
+	fi
+}
+
+# ========= #
+# MAIN MENU #
+# ========= #
+
+# Renders the top-level interactive menu and loops until the user exits or
+# selects a project, delegating to manage_project() for project actions.
+_main_menu() {
+	clear
+	_invalidate_ddev_cache
+
+	local choice
+	local projects_raw=""
+	projects_raw="$(_get_ddev_projects)"
+
+	local -a names=()
+
+	_printbox "$M" "$DDM_INFO"
+
+	if [[ -z "$projects_raw" ]]; then
+		printf "%s\n" "${Y}No DDEV projects found"
+		printf "\n%s\n" "${M}Actions:${NC}"
+		printf "\n%s\n" "${G}[n]${NC}ew-project   ${R}[t]${NC}ools   ${M}[h]${NC}elp   [e]xit"
+	else
+		printf "%s\n\n" "${B}DDEV Projects:${NC}"
+
+		# Sort projects following PROJECT_TYPES registry order (category + position).
+		# Iterates the registry and picks matching projects; unknown prefixes go last.
+		local sorted_raw=""
+		local _line _prefix _pp
+		for entry in "${PROJECT_TYPES[@]}"; do
+			IFS=':' read -r _ _ _pp _ _ <<<"$entry"
+			while IFS= read -r _line; do
+				_prefix="${_line%%|*}"
+				_prefix="${_prefix%%-*}"
+				[[ "$_prefix" == "$_pp" ]] && sorted_raw+="$_line"$'\n'
+			done <<<"$projects_raw"
+		done
+		# Append any projects whose prefix is not in the registry.
+		while IFS= read -r _line; do
+			_prefix="${_line%%|*}"
+			_prefix="${_prefix%%-*}"
+			local _found=0
+			for entry in "${PROJECT_TYPES[@]}"; do
+				IFS=':' read -r _ _ _pp _ _ <<<"$entry"
+				[[ "$_prefix" == "$_pp" ]] && {
+					_found=1
+					break
+				}
+			done
+			[[ $_found -eq 0 ]] && sorted_raw+="$_line"$'\n'
+		done <<<"$projects_raw"
+		sorted_raw="${sorted_raw%$'\n'}"
+		projects_raw="$sorted_raw"
+
+		local i=0
+		local name status _type _location
+		local max_name=0 max_type_with_parens=0 total_projects=0
+
+		# First pass: calculate column widths for aligned output.
+		while IFS='|' read -r name status _type _location; do
+			((total_projects++))
+			local display_type
+			display_type="$(_type_label_from_prefix "$name")"
+			[[ ${#name} -gt $max_name ]] && max_name="${#name}"
+			local type_len=$((${#display_type} + 2))
+			[[ $type_len -gt $max_type_with_parens ]] && max_type_with_parens="$type_len"
+		done <<<"$projects_raw"
+		local idx_pad=$((${#total_projects} + 2))
+
+		# Second pass: render the aligned project list with category headers.
+		local prev_cat="" display_type cat effective_cat prefix entry
+		local pad_name type_with_parens pad_type status_color
+		local -A t
+		while IFS='|' read -r name status _type _location; do
+			display_type="$(_type_label_from_prefix "$name")"
+			# Resolve category from registry
+			prefix="${name%%-*}"
+			cat=""
+			for entry in "${PROJECT_TYPES[@]}"; do
+				_parse_type_entry "$entry" t
+				[[ "${t[prefix]}" == "$prefix" ]] && { cat="${t[cat]}"; break; }
+			done
+			# Print category header on change
+			effective_cat="${cat:-unmanaged}"
+			if [[ "$effective_cat" != "$prev_cat" ]]; then
+				case "$effective_cat" in
+				cms)       printf "%s\n" " ${M}──────────────────── CMS ────────────────────${NC}" ;;
+				framework) printf "%s\n" " ${M}───────────────── Framework ─────────────────${NC}" ;;
+				extra)     printf "%s\n" " ${M}─────────────────── Extra ───────────────────${NC}" ;;
+				unmanaged) printf "%s\n" " ${Y}───────────────── Unmanaged ─────────────────${NC}" ;;
+				esac
+				prev_cat="$effective_cat"
+			fi
+			names+=("$name")
+			status_color="$Y"
+			[[ "$status" == "running" ]] && status_color="$G"
+
+			printf -v pad_name "%-${max_name}s" "$name"
+			type_with_parens="($display_type)"
+			printf -v pad_type "%-${max_type_with_parens}s" "$type_with_parens"
+
+			printf " ${G}%${idx_pad}s${NC} ${C}${pad_name} ${pad_type}${NC} ${status_color}[${status}]${NC}\n" "$((i + 1))"
+
+			((i++))
+		done <<<"$projects_raw"
+
+		printf "\n%s\n\n" "${M}Actions:${NC}"
+		local range="[1]"
+		[[ ${#names[@]} -gt 1 ]] && range="[1-${#names[@]}]"
+		printf "%s\n" " ${C}$range${NC} select-project"
+		if _has_running_projects "$projects_raw"; then
+			printf "%s\n" " ${G}[n]${NC}ew   ${Y}[s]${NC}top-all   ${R}[t]${NC}ools   ${M}[h]${NC}elp   [e]xit"
+		else
+			printf "%s\n" " ${G}[n]${NC}ew   ${R}[t]${NC}ools   ${M}[h]${NC}elp   [e]xit"
+		fi
+	fi
+	_nl
+
+	while true; do
+		choice="$(_read_input "Choice")"
+
+		case "$choice" in
+		n | new)
+			_info "Opening Create New Project..."
+			sleep .5
+			create_project
+			return 0
+			;;
+		t | tools)
+			_info "Opening tools menu..."
+			sleep .5
+			clear
+			tools_menu
+			return 0
+			;;
+		u | update)
+			# Hidden shortcut: not shown in the menu UI.
+			# Requires ddm to be properly installed (DDM_BIN + active PATH).
+			if ! _ddm_is_installed; then
+				_warn "ddm is not properly installed — see Status in 'ddm -h'."
+				sleep 2
+			else
+				_info "Opening update manager..."
+				sleep .5
+				clear
+				check_updates true
+				_presskey
+				return 0
+			fi
+			;;
+		h | help)
+			_info "Opening help..."
+			sleep .5
+			clear
+			help
+			_presskey
+			return 0
+			;;
+
+		b | back | q | quit | e | x | exit)
+			_exit
+			;;
+
+		s | stop)
+			if [[ -z "$projects_raw" ]]; then
+				_warn "No projects found yet."
+				continue
+			fi
+			if ! _has_running_projects "$projects_raw"; then
+				_info "No running projects."
+				continue
+			fi
+			_info "Stopping all projects..."
+			sleep .5
+			clear
+			stop_all
+			return 0
+			;;
+
+		p | poweroff)
+			_info "Powering off DDEV..."
+			sleep .5
+			clear
+			_tools_poweroff
+			_presskey "return"
+			return 0
+			;;
+
+		*)
+			if [[ -n "$projects_raw" ]] && [[ "$choice" =~ ^[0-9]+$ ]] &&
+				[[ "$choice" -ge 1 ]] && [[ "$choice" -le "${#names[@]}" ]]; then
+				local selected="${names[$((choice - 1))]}"
+				_info "Go to: $selected"
+				sleep .5
+				manage_project "$selected"
+				return 0
+			fi
+			_error "Invalid choice. Try again."
+			;;
+		esac
+	done
+}
+
+# ======== #
+# CLI HELP #
+# ======== #
+
+# Prints the full help and usage reference to stdout.
+# Called via 'ddm -h|--help' and from the interactive main menu.
+help() {
+	local ddev_v docker_v is_installed="(disabled: see 'STATUS' above)"
+	ddev_v="$(_ddev_version)"
+	docker_v="$(_docker_version)"
+
+	local bin_ok=false path_ok=false path_in_rc=false
+	local s_installed="" s_skip="" s_path="" s_projects="" status_hint="All is good :)"
+	[[ -x "$DDM_BIN" ]]                       && bin_ok=true
+	[[ ":$PATH:" == *":$HOME/.local/bin:"* ]] && path_ok=true
+	if ! $path_ok; then
+		for _f in "$HOME/.bashrc" "$HOME/.zshrc"; do
+			grep -qE "^[^#]*[$]HOME/.local/bin" "$_f" 2>/dev/null && path_in_rc=true && break
+		done
+	fi
+
+	if [[ -x "$DDM_BIN" ]] && { $path_ok || $path_in_rc; }; then
+		is_installed="Check/install updates"
+	fi
+
+	$bin_ok && s_installed="Yes" || s_installed="No"
+	if $path_ok; then
+		s_path="Ok"
+	elif $path_in_rc; then
+		s_path="Configured (reload shell to apply)"
+	else
+		s_path="Missing"
+	fi
+	[[ -n "$(_conf_get install_skip)" ]] && s_skip="True" || s_skip="False"
+
+	if [[ "$s_skip" == "True" ]]; then
+		status_hint="run '$(basename "$0") -r' to fix"
+	elif ! $bin_ok || { ! $path_ok && ! $path_in_rc; }; then
+		status_hint="run '$(basename "$0")' to setup"
+	fi
+
+	if [[ -n "$ddev_v" ]]; then
+	    local _proj_count
+	    _proj_count="$(_get_ddev_projects 2>/dev/null | wc -l)"
+	    _proj_count="${_proj_count// /}"
+	    [[ "$_proj_count" -gt 0 ]] && s_projects="$_proj_count" || s_projects="none yet"
+	else
+	    s_projects="n/a"
+	fi
+
+	local status_color="$Y"
+	{ $bin_ok && $path_ok; } && status_color="$G"
+
+	_printbox "$M" "$DDM_INFO - Help"
+	cat <<-EOF
+	${C}Author:${NC}  Salvatore Noschese
+	${C}BlogURL:${NC} https://SalvatoreNoschese.it
+	${C}Donate:${NC}  https://PayPal.me/SalvatoreN
+	${C}GitHub:${NC}  https://github.com/SalvatoreNoschese
+
+	${B}> STATUS${NC}    ${status_color}${status_hint}${NC}
+	${C}Installed:${NC}  $s_installed
+	${C}Skip Flag:${NC}  $s_skip
+	${C}SystemPath:${NC} $s_path
+	${C}Projects:${NC}   $s_projects
+	${C}Script:${NC}     $(realpath "$0")
+	${C}Config:${NC}     $([[ -f "$DDM_CONF" ]] && echo "$DDM_CONF" || echo "not set")
+	${C}WorkDir:${NC}    $(_get_workspace_path)
+	${C}DDEV:${NC}       ${ddev_v:-not installed}
+	${C}Docker:${NC}     ${docker_v:-not installed}
+
+	${B}> USAGE${NC}
+	${G}ddm${NC}                Interactive menu (recommended)
+	${G}ddm -h${NC}|${G}--help${NC}      Show this help
+	${G}ddm -l${NC}|${G}--list${NC}      List all projects
+	${G}ddm -p${NC}|${G}--poweroff${NC}  DDEV poweroff
+	${G}ddm -r${NC}|${G}--reset${NC}     Reset all configuration
+	${G}ddm -s${NC}|${G}--stopall${NC}   Stop all running projects
+	${G}ddm -u${NC}|${G}--update${NC}    $is_installed
+	${G}ddm -v${NC}|${G}--version${NC}   Show ddm version
+
+	${B}> NOTE${NC}
+	Project management (start, stop, delete, etc.)
+	is available from the interactive menu: just run '${G}ddm${NC}'
+
+	${B}> SUPPORTED PLATFORMS${NC} (${#PROJECT_TYPES[@]})
+	${C}CMS:${NC} ${#PROJECT_TYPES_CMS[@]} | ${C}Framework:${NC} ${#PROJECT_TYPES_FRAMEWORK[@]} | ${C}Extra:${NC} ${#PROJECT_TYPES_EXTRA[@]}
+
+	${B}> DATABASE CREDENTIALS${NC} (all projects with a DB)
+	${C}Host:${NC} db | ${C}Name:${NC} db | ${C}User:${NC} db | ${C}Password:${NC} db
+	${Y}* For local development only — never use in production!${NC}
+
+	${B}> RESOURCES${NC}
+	$DDEV_DOCS_URL
+	$DOCKER_DOCS_URL
+	EOF
+}
+
+# Returns 0 if ddm is properly installed: binary exists and PATH is active.
+_ddm_is_installed() {
+	[[ -x "$DDM_BIN" ]] && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]
+}
+
+# =========== #
+# CLI HANDLER #
+# =========== #
+
+handle_cli() {
+	# Guard for operational commands: verifies ddev and jq are available.
+	# -v, -h, -r skip this check intentionally — they need no system deps.
+	_cli_require() {
+		local missing=()
+		command -v ddev &>/dev/null || missing+=("ddev")
+		command -v jq   &>/dev/null || missing+=("jq")
+		if (( ${#missing[@]} )); then
+			_error "Missing: ${missing[*]}. Run 'ddm' to install dependencies."
+			exit 1
+		fi
+	}
+
+	case "${1:-}" in
+	-v | --version)
+		printf "%s\n" "$DDM_INFO"
+		;;
+	-h | --help)
+		help
+		_nl
+		;;
+	-r | --reset)
+		if [[ -f "$DDM_CONF" ]]; then
+			rm -f "$DDM_CONF"
+			_done "Configuration reset."
+			_say "$B" "Run 'ddm' to reconfigure."
+		else
+			_warn "No configuration file found, nothing to reset."
+		fi
+		;;
+	-l | --list)
+		_cli_require
+		local projects_raw
+		projects_raw="$(_get_ddev_projects)"
+		if [[ -z "$projects_raw" ]]; then
+			_warn "No DDEV projects found."
+		else
+			printf "%s\n" "$projects_raw" | column -t -s'|'
+		fi
+		;;
+	-s | --stopall)
+		_cli_require
+		local projects_raw
+		projects_raw="$(_get_ddev_projects)"
+		if [[ -z "$projects_raw" ]]; then
+			_warn "No DDEV projects found."
+		elif ! _has_running_projects "$projects_raw"; then
+			_info "No running projects."
+		else
+			stop_all
+		fi
+		;;
+	-p | --poweroff)
+		_cli_require
+		_tools_poweroff
+		;;
+	-u | --update)
+		_cli_require
+		if ! _ddm_is_installed; then
+			_warn "ddm is not properly installed — see Status in 'ddm -h'."
+			exit 1
+		else
+			check_updates true
+		fi
+		;;
+	*)
+		printf "\n%s\n" "Unknown option: $1"
+		printf "%s\n\n" "Run 'ddm -h' for help."
+		exit 1
+		;;
+	esac
+}
+
+# ============== #
+# MAIN EXECUTION #
+# ============== #
+
+if [[ $# -eq 0 ]]; then
+	check_system
+	while true; do
+		_main_menu
+	done
+else
+	handle_cli "$@"
+fi
