@@ -8,6 +8,12 @@
 
 **Professional DDEV project manager with one-click installations and multi-framework support**
 
+<p align="center">
+  <img src="assets/ddm-help.png" width="32%" />
+  <img src="assets/ddm-new.png" width="32%" />
+  <img src="assets/ddm-tools.png" width="32%" />
+</p>
+
 ---
 
 ## ✨ Features
