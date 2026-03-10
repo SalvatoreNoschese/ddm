@@ -24,13 +24,22 @@
 - **🚀 [Installation](#-installation)**
 - **📖 [Usage](#-usage)**
 - **🎯 [Platforms](#-supported-platforms-25)**
+- **🏷️ [Project Naming](#-project-naming)**
 - **📊 [Database](#-database-credentials)**
 - **🧹 [Tools & Maintenance](#-tools--maintenance)**
 - **🔄 [Auto-Update](#-auto-update-system)**
+- **🔧 [Dependency Checks](#-dependency-checks)**
+- **💻 [Supported Systems](#-supported-systems)**
 - **🎬 [First Run](#-first-run)**
+- **🚀 [Speed Up Your Workflow](#-speed-up-your-workflow)**
 - **📚 [Examples](#-examples)**
 - **🩺 [Troubleshooting](#-troubleshooting)**
 - **🎨 [Developer Zone](#-developer-zone)**
+- **📋 [Requirements](#-requirements)**
+- **📄 [License](#-license)**
+- **🤝 [Contributing](#-contributing)**
+- **📗 [Links](#-links)**
+- **💖 [Support](#-support)**
 
 ---
 
