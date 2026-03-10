@@ -16,23 +16,25 @@
   <img src="assets/ddm-help.png" width="19%" />
 </p>
 
-### 📍 Quick Links
+---
 
-- [✨ Features](#-features)
-- [🚀 Installation](#-installation)
-- [📖 Usage](#-usage)
-- [🎯 Platforms](#-supported-platforms-25)
-- [📊 Database](#-database-credentials)
-- [🧹 Tools](#-tools--maintenance)
-- [🔄 Updates](#-auto-update-system)
-- [🎬 First Run](#-first-run)
-- [📚 Examples](#-examples)
-- [🩺 Troubleshooting](#-troubleshooting)
-- [🎨 Dev Zone](#-developer-zone)
+#### 📍 Quick Navigation
+
+- **✨ [Features](#-features)**
+- **🚀 [Installation](#-installation)**
+- **📖 [Usage](#-usage)**
+- **🎯 [Platforms](#-supported-platforms-25)**
+- **📊 [Database](#-database-credentials)**
+- **🧹 [Tools & Maintenance](#-tools--maintenance)**
+- **🔄 [Auto-Update](#-auto-update-system)**
+- **🎬 [First Run](#-first-run)**
+- **📚 [Examples](#-examples)**
+- **🩺 [Troubleshooting](#-troubleshooting)**
+- **🎨 [Developer Zone](#-developer-zone)**
 
 ---
 
-## ✨ Features
+### ✨ Features
 
 - 🚀 **One-Click Installations** — Fully automated setup for 25 different platforms
 - ✅ **Smart Dependency Checks** — Detects missing tools with guided install commands
@@ -45,18 +47,20 @@
 - 💾 **Database Operations** — Wipe DB while keeping files, or full project deletion
 - 🔒 **Safe Workspace** — Path validation prevents accidental operations on system directories
 
-## 🚀 Installation
+---
 
+### 🚀 Installation
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SalvatoreNoschese/ddm/main/ddm -o ddm && bash ddm
 ```
 - No root required.
 - On first run, ddm checks dependencies, guides setup, and offers to copy itself to `~/.local/bin` and add it to your PATH automatically.
 
-## 📖 Usage
+---
 
-### Interactive Mode
+### 📖 Usage
 
+#### Interactive Mode
 ```bash
 ddm
 ```
@@ -67,7 +71,7 @@ The interactive menu provides:
 - One-key actions for all operations
 - Tools and maintenance menu
 
-### ⚡ CLI Utilities
+#### ⚡ CLI Utilities
 
 | Command | Description |
 |---------|-------------|
@@ -82,10 +86,9 @@ The interactive menu provides:
 
 > All project management (start, stop, restart, delete, SSH, etc.) is available from the interactive menu: just run `ddm`
 
-### `ddm -h` Status Section
+#### `ddm -h` Status Section
 
 The help output includes a **> STATUS** block that shows the current installation state at a glance:
-
 ```
 > STATUS    All is good :)
 Installed:  Yes
@@ -101,9 +104,11 @@ SystemPath: Ok
 
 If anything is wrong, the header shows a hint: `run 'ddm' to setup` or `run 'ddm -r' to fix`.
 
-## 🎯 Supported Platforms (25)
+---
 
-### CMS (15)
+### 🎯 Supported Platforms (25)
+
+#### CMS (15)
 
 | Platform | Prefix | Admin | Credentials |
 |---|---|---|---|
@@ -123,7 +128,7 @@ If anything is wrong, the header shows a hint: `run 'ddm' to setup` or `run 'ddm
 | [Winter CMS](https://wintercms.com/) | `win-` | `/backend` | admin / admin |
 | [ProcessWire](https://processwire.com/) | `pw-` | `/processwire` | browser install |
 
-### Framework (5)
+#### Framework (5)
 
 | Platform | Prefix | Notes |
 |---|---|---|
@@ -133,7 +138,7 @@ If anything is wrong, the header shows a hint: `run 'ddm' to setup` or `run 'ddm
 | [CodeIgniter](https://codeigniter.com/) | `ci-` | DB auto-configured |
 | [PHP Generic](https://www.php.net/) | `php-` | LAMP stack, phpinfo() starter |
 
-### Extra (5)
+#### Extra (5)
 
 | Platform | Prefix | Admin | Notes |
 |---|---|---|---|
@@ -143,10 +148,11 @@ If anything is wrong, the header shows a hint: `run 'ddm' to setup` or `run 'ddm
 | [Flarum](https://flarum.org/) | `flr-` | `/admin` | browser install |
 | [Matomo Analytics](https://matomo.org/) | `mat-` | `/` | browser install |
 
-## 🏷️ Project Naming
+---
+
+### 🏷️ Project Naming
 
 Projects are created with a type-specific prefix to avoid conflicts:
-
 ```bash
 # You enter: "myblog"
 # WordPress creates: "wp-myblog"
@@ -160,7 +166,9 @@ Projects are created with a type-specific prefix to avoid conflicts:
 
 Enter the name **without the prefix** — ddm adds it automatically.
 
-## 📊 Database Credentials
+---
+
+### 📊 Database Credentials
 
 All projects that use a database share standardized development credentials:
 
@@ -173,23 +181,27 @@ All projects that use a database share standardized development credentials:
 
 Each project has isolated containers. **Never use these credentials in production.**
 
-## 🧹 Tools & Maintenance
+---
+
+### 🧹 Tools & Maintenance
 
 Access via the interactive menu → Tools:
 
-### [1] DDEV Poweroff
+#### [1] DDEV Poweroff
 Stops all containers, the router, and the SSH agent. No confirmation required, no data lost.
 
-### [2] Poweroff + Docker Cleaner
+#### [2] Poweroff + Docker Cleaner
 Runs poweroff, then removes unused Docker images, build cache, old DDEV images, and inactive hostnames. Projects and databases are **not** affected.
 
-### [3] Delete All Projects
+#### [3] Delete All Projects
 Removes all projects from the DDEV registry. Project directories remain on disk for safety. Offers snapshot save/skip choice.
 
-### [n] Nuclear Reset 🚨
+#### [n] Nuclear Reset 🚨
 Poweroff + Docker Cleaner + Delete All + full Docker wipe (containers, volumes, images, networks). **Destructive and irreversible** — requires explicit confirmation.
 
-## 🔄 Auto-Update System
+---
+
+### 🔄 Auto-Update System
 
 ddm checks for updates to itself **and** to DDEV:
 
@@ -198,7 +210,6 @@ ddm checks for updates to itself **and** to DDEV:
 - **ddm update:** Compares version string against GitHub, downloads and replaces `~/.local/bin/ddm` atomically using `install -m 755`
 - **DDEV update:** Tries `ddev self-upgrade` first; falls back to the install script for script-based installations
 - **Docker update:** Not managed by ddm — updates are handled by your system package manager (`apt`, `pacman`, `dnf`, etc.)
-
 ```bash
 ddm -u    # Force check now
 ```
@@ -207,7 +218,9 @@ Update timestamp stored in: `~/.config/ddm/ddm-update-check`
 
 > **Note:** update management requires ddm to be properly installed (`~/.local/bin/ddm` present and in PATH). If not, the option is disabled and `ddm -h` explains the current status.
 
-## 🔧 Dependency Checks
+---
+
+### 🔧 Dependency Checks
 
 ddm checks for everything on startup and guides you through any missing component:
 
@@ -222,7 +235,9 @@ ddm checks for everything on startup and guides you through any missing componen
 
 If Docker or DDEV is missing, ddm offers to install them automatically.
 
-## 💻 Supported Systems
+---
+
+### 💻 Supported Systems
 
 Fully tested:
 - **Arch family** (Arch, Manjaro, EndeavourOS)
@@ -232,10 +247,12 @@ Fully tested:
 Best-effort support (guidance provided):
 - Other systemd-based Linux distributions
 
-**Not supported:** Termux.
+**Not supported:** Termux.  
 **Android:** Supported via proot-distro or similar full Linux environments (workspace fixed to `~/ddev-projects` for stability).
 
-## 🎬 First Run
+---
+
+### 🎬 First Run
 
 On first run, ddm will:
 
@@ -248,7 +265,7 @@ On first run, ddm will:
 
 To reset all configuration and start over: `ddm -r`
 
-### Smart PATH & Install Setup
+#### Smart PATH & Install Setup
 
 On every launch from outside `~/.local/bin`, ddm checks three things:
 
@@ -270,10 +287,11 @@ If you decline the setup, ddm saves a `install_skip` flag and won't ask again. T
 
 **Auto-heal:** if you manually copy ddm to `~/.local/bin` and PATH is configured, the skip flag is cleared automatically on the next launch — no need to run `-r`.
 
-## 🚀 Speed Up Your Workflow
+---
+
+### 🚀 Speed Up Your Workflow
 
 Useful aliases for `~/.bashrc` or `~/.zshrc`:
-
 ```bash
 alias drush='ddev drush'
 alias composer='ddev composer'
@@ -283,9 +301,11 @@ alias bee='ddev bee'
 alias typo3='ddev typo3'
 ```
 
-## 📚 Examples
+---
 
-### Create a WordPress site
+### 📚 Examples
+
+#### Create a WordPress site
 ```bash
 ddm
 # Choose: New project → WordPress
@@ -294,7 +314,7 @@ ddm
 # Login: admin / admin
 ```
 
-### Create a Laravel project
+#### Create a Laravel project
 ```bash
 ddm
 # Choose: New project → Laravel
@@ -303,30 +323,31 @@ ddm
 # Database already configured in .env
 ```
 
-### Common project operations
+#### Common project operations
 All project actions are available from the interactive menu.
 ```bash
 ddm    # Launch menu, select project, then choose action
 ```
 
-## 🩺 Troubleshooting
+---
 
-### Docker permission denied
+### 🩺 Troubleshooting
+
+#### Docker permission denied
 ddm detects this and offers to fix it automatically:
 ```bash
 sudo usermod -aG docker $USER
 # Then log out and back in (or: newgrp docker)
 ```
 
-### Docker service not running
+#### Docker service not running
 ```bash
 sudo systemctl enable --now docker
 ```
 
-### ddm not found after install
+#### ddm not found after install
 
 ddm handles PATH setup automatically on first run. If the command is still not found after setup:
-
 ```bash
 source ~/.bashrc   # or ~/.zshrc
 # Or open a new terminal — the PATH change takes effect immediately
@@ -334,17 +355,19 @@ source ~/.bashrc   # or ~/.zshrc
 
 If you skipped setup and want to be asked again: `./ddm -r` (or `bash ddm -r` if not executable)
 
-### Network/bridge errors on project start
+#### Network/bridge errors on project start
 ```bash
 sudo modprobe bridge && sudo modprobe veth
 # Or reboot if you recently updated the kernel
 ```
 
-## 🎨 Developer Zone
+---
+
+### 🎨 Developer Zone
 
 Want to add a new CMS or framework? ddm is designed for easy extension.
 
-### How to Add a New Project Type
+#### How to Add a New Project Type
 
 1. **Add an entry to `PROJECT_TYPES_CMS`, `PROJECT_TYPES_FRAMEWORK`, or `PROJECT_TYPES_EXTRA`** (format: `"key:Display Name:prefix:admin_path"`):
 ```bash
@@ -383,7 +406,9 @@ _finalize_installation "$name" "username" "password" "notes" ["nodb"]
 # Pass "nodb" as 5th argument to skip the DB manager prompt
 ```
 
-## 📋 Requirements
+---
+
+### 📋 Requirements
 
 - **Linux** (any modern distribution)
 - **Docker** with Compose v2
@@ -392,21 +417,29 @@ _finalize_installation "$name" "username" "password" "notes" ["nodb"]
 
 ddm checks and installs missing dependencies on startup.
 
-## 📄 License
+---
+
+### 📄 License
 
 MIT License — see [LICENSE](LICENSE)
 
-## 🤝 Contributing
+---
+
+### 🤝 Contributing
 
 The codebase is well-organized and documented. Contributions welcome via issues or pull requests on [GitHub](https://github.com/SalvatoreNoschese/ddm/issues).
 
-## 📗 Links
+---
 
-### DDEV & Docker
+### 📗 Links
+
+#### DDEV & Docker
 - [DDEV Documentation](https://ddev.com)
 - [Docker Documentation](https://docs.docker.com/)
 
-## 💖 Support
+---
+
+### 💖 Support
 
 If you find ddm useful:
 - ⭐ **Star the repository** on GitHub
