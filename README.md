@@ -16,6 +16,20 @@
   <img src="assets/ddm-help.png" width="19%" />
 </p>
 
+### 📍 Quick Links
+
+- [✨ Features](#-features)
+- [🚀 Installation](#-installation)
+- [📖 Usage](#-usage)
+- [🎯 Platforms](#-supported-platforms-25)
+- [📊 Database](#-database-credentials)
+- [🧹 Tools](#-tools--maintenance)
+- [🔄 Updates](#-auto-update-system)
+- [🎬 First Run](#-first-run)
+- [📚 Examples](#-examples)
+- [🩺 Troubleshooting](#-troubleshooting)
+- [🎨 Dev Zone](#-developer-zone)
+
 ---
 
 ## ✨ Features
@@ -295,7 +309,7 @@ All project actions are available from the interactive menu.
 ddm    # Launch menu, select project, then choose action
 ```
 
-## 🛠️ Troubleshooting
+## 🩺 Troubleshooting
 
 ### Docker permission denied
 ddm detects this and offers to fix it automatically:
@@ -402,4 +416,4 @@ If you find ddm useful:
 
 ---
 
-**Made with ❤️ by [Salvatore Noschese](https://SalvatoreNoschese.it)**
+**Made with ❤️ by [Salvatore Noschese](https://SalvatoreNoschese.it/ddevmanager-ddm-da-script-di-50-righe-a-tool-completo/)**
