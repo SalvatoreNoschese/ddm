@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ================================================== #
-# DDevManager (ddm) v1.0.0                           #
+# DDEV CLI Manager (ddm) v1.0.1                      #
 # One-click DDEV project manager for:                #
 # WordPress, Drupal, Joomla, Laravel and more...     #
 #                                                    #
@@ -16,11 +16,11 @@ set -u
 # CONFIGURATION & GLOBALS #
 # ======================= #
 
-DDM_VER="1.0.0"
+DDM_VER="1.0.1"
 DDM_BIN="$HOME/.local/bin/ddm"
 DDM_CONFIG_DIR="$HOME/.config/ddm"
 DDM_CONF="$DDM_CONFIG_DIR/ddm.conf"
-DDM_INFO="DDevManager (ddm) v$DDM_VER"
+DDM_INFO="DDEV CLI Manager (ddm) v$DDM_VER"
 
 UPDATE_FILE="$DDM_CONFIG_DIR/ddm-update-check"
 UPDATE_INTERVAL=604800 # 7 days in seconds
