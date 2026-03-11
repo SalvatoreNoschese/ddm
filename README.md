@@ -8,7 +8,7 @@ A lightweight CLI to manage multiple DDEV projects from the terminal.
 
 > ⚠️ Not to be confused with [DDEV Manager](https://ddev-manager.github.io/) — that's a desktop GUI. ddm is a Linux CLI tool.
 
-![DDevManager](/assets/banner.png)
+![DDevManager](/assets/ddm-banner.png)
 
 **Professional DDEV project manager with one-click installations and multi-framework support**
 
