@@ -65,7 +65,7 @@
 - 💾 **Database Operations** — Wipe DB while keeping files, or full project deletion
 - 🔒 **Safe Workspace** — Path validation prevents accidental operations on system directories
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -76,7 +76,7 @@ curl -fsSL https://raw.githubusercontent.com/SalvatoreNoschese/ddm/main/ddm -o d
 - No root required.
 - On first run, ddm checks dependencies, guides setup, and offers to copy itself to `~/.local/bin` and add it to your PATH automatically.
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -126,7 +126,7 @@ SystemPath: Ok
 
 If anything is wrong, the header shows a hint: `run 'ddm' to setup` or `run 'ddm -r' to fix`.
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -172,7 +172,7 @@ If anything is wrong, the header shows a hint: `run 'ddm' to setup` or `run 'ddm
 | [Flarum](https://flarum.org/) | `flr-` | `/admin` | browser install |
 | [Matomo Analytics](https://matomo.org/) | `mat-` | `/` | browser install |
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -192,7 +192,7 @@ Projects are created with a type-specific prefix to avoid conflicts:
 
 Enter the name **without the prefix** — ddm adds it automatically.
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -209,7 +209,7 @@ All projects that use a database share standardized development credentials:
 
 Each project has isolated containers. **Never use these credentials in production.**
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -229,7 +229,7 @@ Removes all projects from the DDEV registry. Project directories remain on disk 
 #### [n] Nuclear Reset 🚨
 Poweroff + Docker Cleaner + Delete All + full Docker wipe (containers, volumes, images, networks). **Destructive and irreversible** — requires explicit confirmation.
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -250,7 +250,7 @@ Update timestamp stored in: `~/.config/ddm/ddm-update-check`
 
 > **Note:** update management requires ddm to be properly installed (`~/.local/bin/ddm` present and in PATH). If not, the option is disabled and `ddm -h` explains the current status.
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -269,7 +269,7 @@ ddm checks for everything on startup and guides you through any missing componen
 
 If Docker or DDEV is missing, ddm offers to install them automatically.
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -286,7 +286,7 @@ Best-effort support (guidance provided):
 **Not supported:** Termux.  
 **Android:** Supported via proot-distro or similar full Linux environments (workspace fixed to `~/ddev-projects` for stability).
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -325,7 +325,7 @@ If you decline the setup, ddm saves a `install_skip` flag and won't ask again. T
 
 **Auto-heal:** if you manually copy ddm to `~/.local/bin` and PATH is configured, the skip flag is cleared automatically on the next launch — no need to run `-r`.
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -341,7 +341,7 @@ alias bee='ddev bee'
 alias typo3='ddev typo3'
 ```
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -371,7 +371,7 @@ All project actions are available from the interactive menu.
 ddm    # Launch menu, select project, then choose action
 ```
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -405,7 +405,7 @@ sudo modprobe bridge && sudo modprobe veth
 # Or reboot if you recently updated the kernel
 ```
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -452,7 +452,7 @@ _finalize_installation "$name" "username" "password" "notes" ["nodb"]
 # Pass "nodb" as 5th argument to skip the DB manager prompt
 ```
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -465,7 +465,7 @@ _finalize_installation "$name" "username" "password" "notes" ["nodb"]
 
 ddm checks and installs missing dependencies on startup.
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -473,7 +473,7 @@ ddm checks and installs missing dependencies on startup.
 
 MIT License — see [LICENSE](LICENSE)
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -481,7 +481,7 @@ MIT License — see [LICENSE](LICENSE)
 
 The codebase is well-organized and documented. Contributions welcome via issues or pull requests on [GitHub](https://github.com/SalvatoreNoschese/ddm/issues).
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -491,7 +491,7 @@ The codebase is well-organized and documented. Contributions welcome via issues 
 - [DDEV Documentation](https://ddev.com)
 - [Docker Documentation](https://docs.docker.com/)
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
@@ -503,7 +503,7 @@ If you find ddm useful:
 - 📖 **Share** with other developers
 - ☕ **[Buy me a coffee](https://paypal.me/SalvatoreN)**
 
-<p align="right"><a href="#ddevmanager-ddm">↑ Back to top</a></p>
+<p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
 ---
 
