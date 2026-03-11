@@ -4,21 +4,11 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-linux-lightgrey)
 
-A lightweight CLI to manage multiple DDEV projects from the terminal.
+*Professional DDEV CLI Manager with one-click installations and multi-framework support*
 
 > ⚠️ Not to be confused with [DDEV Manager](https://ddev-manager.github.io/) — that's a desktop GUI. ddm is a Linux CLI tool.
 
 ![DDevManager](/assets/ddm-banner.png)
-
-**Professional DDEV project manager with one-click installations and multi-framework support**
-
-<p align="center">
-  <img src="assets/ddm-main.png" width="19%" />
-  <img src="assets/ddm-new.png" width="19%" />
-  <img src="assets/ddm-project.png" width="19%" />
-  <img src="assets/ddm-tools.png" width="19%" />
-  <img src="assets/ddm-help.png" width="19%" />
-</p>
 
 ---
 
@@ -33,17 +23,32 @@ A lightweight CLI to manage multiple DDEV projects from the terminal.
 - **🧹 [Tools & Maintenance](#-tools--maintenance)**
 - **🔄 [Auto-Update](#-auto-update-system)**
 - **🔧 [Dependency Checks](#-dependency-checks)**
-- **💻 [Supported Systems](#-supported-systems)**
+- **🐧 [Supported Systems](#-supported-systems)**
 - **🎬 [First Run](#-first-run)**
 - **🚀 [Speed Up Your Workflow](#-speed-up-your-workflow)**
 - **📚 [Examples](#-examples)**
 - **🩺 [Troubleshooting](#-troubleshooting)**
-- **🎨 [Developer Zone](#-developer-zone)**
+- **👩‍💻 [Developer Zone](#-developer-zone)**
 - **📋 [Requirements](#-requirements)**
 - **📄 [License](#-license)**
 - **🤝 [Contributing](#-contributing)**
 - **📗 [Links](#-links)**
 - **💖 [Support](#-support)**
+
+---
+
+#### 🎨 Screenshots 
+
+<p align="center">
+  <img src="assets/1-ddm-main.png" width="30%" />
+  <img src="assets/2-ddm-new.png" width="30%" />
+  <img src="assets/3-ddm-project.png" width="30%" />
+</p>
+<p align="center">
+  <img src="assets/4-ddm-start.png" width="30%" />
+ <img src="assets/5-ddm-tools.png" width="30%" />
+  <img src="assets/6-ddm-help.png" width="30%" />
+</p>
 
 ---
 
@@ -268,7 +273,7 @@ If Docker or DDEV is missing, ddm offers to install them automatically.
 
 ---
 
-### 💻 Supported Systems
+### 🐧 Supported Systems
 
 Fully tested:
 - **Arch family** (Arch, Manjaro, EndeavourOS)
@@ -404,7 +409,7 @@ sudo modprobe bridge && sudo modprobe veth
 
 ---
 
-### 🎨 Developer Zone
+### 👩‍💻 Developer Zone
 
 Want to add a new CMS or framework? ddm is designed for easy extension.
 
