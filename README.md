@@ -12,7 +12,7 @@
 
 ---
 
-#### 🎨 Screenshots 
+### 🎨 Screenshots 
 
 <p align="center">
   <img src="assets/1-ddm-main.png" width="30%" />
