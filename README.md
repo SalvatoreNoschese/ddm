@@ -8,21 +8,21 @@
 
 > ⚠️ Not to be confused with [DDEV Manager](https://ddev-manager.github.io/) — that's a desktop GUI. ddm is a Linux CLI tool.
 
-![DDevManager](/assets/ddm-banner.png)
+![DDevManager](https://github.com/SalvatoreNoschese/ddm/raw/main/assets/ddm-banner.png)
 
 ---
 
 ### 🎨 Screenshots 
 
 <p align="center">
-  <img src="assets/1-ddm-main.png" width="30%" />
-  <img src="assets/2-ddm-new.png" width="30%" />
-  <img src="assets/3-ddm-project.png" width="30%" />
+  <img src="https://github.com/SalvatoreNoschese/ddm/raw/main/assets/1-ddm-main.png" width="30%" />
+  <img src="https://github.com/SalvatoreNoschese/ddm/raw/main/assets/2-ddm-new.png" width="30%" />
+  <img src="https://github.com/SalvatoreNoschese/ddm/raw/main/assets/3-ddm-project.png" width="30%" />
 </p>
 <p align="center">
-  <img src="assets/4-ddm-start.png" width="30%" />
- <img src="assets/5-ddm-tools.png" width="30%" />
-  <img src="assets/6-ddm-help.png" width="30%" />
+  <img src="https://github.com/SalvatoreNoschese/ddm/raw/main/assets/4-ddm-start.png" width="30%" />
+ <img src=https://github.com/SalvatoreNoschese/ddm/raw/main/"assets/5-ddm-tools.png" width="30%" />
+  <img src="https://github.com/SalvatoreNoschese/ddm/raw/main/assets/6-ddm-help.png" width="30%" />
 </p>
 
 ---
