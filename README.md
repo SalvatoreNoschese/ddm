@@ -21,7 +21,7 @@
 </p>
 <p align="center">
   <img src="https://github.com/SalvatoreNoschese/ddm/raw/main/assets/4-ddm-start.png" width="30%" />
- <img src=https://github.com/SalvatoreNoschese/ddm/raw/main/"assets/5-ddm-tools.png" width="30%" />
+ <img src=https://github.com/SalvatoreNoschese/ddm/raw/main/assets/5-ddm-tools.png" width="30%" />
   <img src="https://github.com/SalvatoreNoschese/ddm/raw/main/assets/6-ddm-help.png" width="30%" />
 </p>
 
