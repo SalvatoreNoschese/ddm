@@ -1,6 +1,6 @@
 # DDEV CLI Manager (ddm)
 
-![Version](https://img.shields.io/badge/version-1.0.1-blue)
+![Version](https://img.shields.io/badge/version-1.0.2-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-linux-lightgrey)
 
@@ -29,10 +29,10 @@
 
 ### ✨ Features
 
-- 🚀 **One-Click Installations** — Fully automated setup for 25 different platforms
+- 🚀 **One-Click Installations** — Fully automated setup for 26 different platforms
 - ✅ **Smart Dependency Checks** — Detects missing tools with guided install commands
 - 🔄 **Auto-Update System** — Weekly checks for ddm and DDEV + manual update command
-- 📦 **25 Supported Platforms** — WordPress, Drupal, Joomla, TYPO3, Laravel, Symfony, and more
+- 📦 **26 Supported Platforms** — WordPress, Drupal, Joomla, TYPO3, Laravel, Symfony, and more
 - 🎨 **Interactive Menu** — Menu-driven interface with CLI utilities
 - 🗄️ **DB Manager Integration** — Optional Adminer or phpMyAdmin per-project
 - 🧹 **Tools & Maintenance Menu** — Docker space recovery, project management, nuclear reset
@@ -105,7 +105,7 @@ If anything is wrong, the header shows a hint: `run 'ddm' to setup` or `run 'ddm
 
 ---
 
-### 🎯 Supported Platforms (25)
+### 🎯 Supported Platforms (26)
 
 #### CMS (15)
 
@@ -137,7 +137,7 @@ If anything is wrong, the header shows a hint: `run 'ddm' to setup` or `run 'ddm
 | [CodeIgniter](https://codeigniter.com/) | `ci-` | DB auto-configured |
 | [PHP Generic](https://www.php.net/) | `php-` | LAMP stack, phpinfo() starter |
 
-#### Extra (5)
+#### Extra (6)
 
 | Platform | Prefix | Admin | Notes |
 |---|---|---|---|
@@ -146,6 +146,7 @@ If anything is wrong, the header shows a hint: `run 'ddm' to setup` or `run 'ddm
 | [PrestaShop](https://www.prestashop.com/) | `ps-` | `/admin*` | browser install (DB: db/db/db/db) |
 | [Flarum](https://flarum.org/) | `flr-` | `/admin` | browser install |
 | [Matomo Analytics](https://matomo.org/) | `mat-` | `/` | browser install |
+| [AESBin](https://github.com/SalvatoreNoschese/AESBin) | `aes-` | `/` | browser install (DB: db/db/db/db); guard code in `app/setup/_viewme/`. Settings may warn about the client IP behind DDEV's router: harmless locally |
 
 <p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 

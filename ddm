@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ================================================== #
-# DDEV CLI Manager (ddm) v1.0.1                      #
+# DDEV CLI Manager (ddm) v1.0.2                      #
 # One-click DDEV project manager for:                #
 # WordPress, Drupal, Joomla, Laravel and more...     #
 #                                                    #
@@ -16,7 +16,7 @@ set -u
 # CONFIGURATION & GLOBALS #
 # ======================= #
 
-DDM_VER="1.0.1"
+DDM_VER="1.0.2"
 DDM_BIN="$HOME/.local/bin/ddm"
 DDM_CONFIG_DIR="$HOME/.config/ddm"
 DDM_CONF="$DDM_CONFIG_DIR/ddm.conf"
@@ -158,6 +158,7 @@ PROJECT_TYPES_EXTRA=(
 	"prestashop:PrestaShop:ps:/"
 	"flarum:Flarum - Forum:flr:/admin"
 	"matomo:Matomo Analytics:mat:/"
+	"aesbin:AESBin - File Manager:aes:/"
 )
 
 # Build combined PROJECT_TYPES array at startup.
@@ -953,6 +954,59 @@ install_matomo() {
 	fi
 
 	_finalize_installation "$name" "" "" "Browser installer: DB host=db  DB name=db  DB user=db  DB pass=db"
+}
+
+install_aesbin() {
+	local name="$1"
+	_setup_project_dir "$name" || return 1
+
+	# The latest release tag: /releases/latest redirects to /releases/tag/vX.Y.Z.
+	_info "Looking for the latest AESBin release..."
+	local tag
+	tag="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/SalvatoreNoschese/AESBin/releases/latest")" || {
+		_error "Could not reach GitHub"
+		return 1
+	}
+	tag="${tag##*/}"
+	if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		_error "Unexpected release tag: '$tag'"
+		return 1
+	fi
+
+	_info "Downloading AESBin ${tag}..."
+	trap 'rm -f aesbin.zip' RETURN
+	curl -fL "https://github.com/SalvatoreNoschese/AESBin/archive/refs/tags/${tag}.zip" -o aesbin.zip || {
+		_error "Download failed"
+		return 1
+	}
+	unzip -q aesbin.zip || {
+		_error "Unzip failed"
+		return 1
+	}
+	rm -f aesbin.zip; trap - RETURN
+
+	# The archive holds AESBin-<version>/ with app/, public/ and the rest.
+	local dir="AESBin-${tag#v}"
+	if [[ ! -d "$dir/public" ]]; then
+		_error "Unexpected archive layout"
+		return 1
+	fi
+	(
+		shopt -s dotglob
+		mv "$dir"/* .
+	)
+	rm -rf "$dir"
+
+	# public/ as the document root; Apache because the rules live in .htaccess;
+	# PHP 8.3 is AESBin's minimum.
+	_info "Configuring AESBin..."
+	ddev config --project-type=php --php-version=8.3 --docroot=public --webserver-type=apache-fpm || {
+		_error "DDEV config failed"
+		return 1
+	}
+	_ddev_start || return 1
+
+	_finalize_installation "$name" "" "" "Browser installer: DB host=db  DB name=db  DB user=db  DB pass=db  |  Guard code: app/setup/_viewme/* in the project folder |  Settings may warn about the client IP behind DDEV's router: harmless locally"
 }
 
 # ====================================================================== #
