@@ -6,7 +6,7 @@
 #                                                    #
 # Author:   Salvatore Noschese                       #
 # Web:      https://SalvatoreNoschese.it             #
-# Donate:   https://donate.salvatorenoschese.it/     #
+# Donate:   https://donate.salvatorenoschese.it      #
 # Repo:     https://github.com/SalvatoreNoschese/ddm #
 # License:  MIT                                      #
 # ================================================== #
@@ -3215,7 +3215,7 @@ help() {
 	cat <<-EOF
 	${C}Author:${NC}  Salvatore Noschese
 	${C}BlogURL:${NC} https://SalvatoreNoschese.it
-	${C}Donate:${NC}  https://PayPal.me/SalvatoreN
+	${C}Donate:${NC}  https://donate.salvatorenoschese.it
 	${C}GitHub:${NC}  https://github.com/SalvatoreNoschese
 
 	${B}> STATUS${NC}    ${status_color}${status_hint}${NC}
