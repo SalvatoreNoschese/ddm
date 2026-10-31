@@ -477,7 +477,7 @@ If you find ddm useful:
 - ⭐ **Star the repository** on GitHub
 - 🐛 **Report bugs** and suggest features via Issues
 - 📖 **Share** with other developers
-- ☕ **[Buy me a coffee](https://paypal.me/SalvatoreN)**
+- ☕ **[Buy me a coffee](https://donate.salvatorenoschese.it/)**
 
 <p align="right"><a href="#ddev-cli-manager-ddm">↑ Back to top</a></p>
 
