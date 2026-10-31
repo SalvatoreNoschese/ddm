@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-linux-lightgrey)
 
-*Professional DDEV CLI Manager with one-click installations and multi-framework support*
+*DDEV CLI Manager with one-click installations and multi-framework support*
 
 > ⚠️ Not to be confused with [DDEV Manager](https://ddev-manager.github.io/) — that's a desktop GUI. ddm is a Linux CLI tool.
 
